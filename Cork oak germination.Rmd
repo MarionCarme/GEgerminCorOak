@@ -1,0 +1,1261 @@
+---
+titlK: "Germination modelling"
+author: "Marion Carme"
+datK: "2023-04-13"
+output:
+  html_document:
+    df_print: paged
+  latex_enginK: xelatex
+  pdf_document: 
+editor_options:
+  chunk_output_typK: console
+  chunk_output_type: console
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(warning = FALSE, message = FALSE)
+```
+
+
+```{r packages}
+library(anyLib)#to load packages and install them if not already installed.
+anyLib(list("readxl", 
+            "tidyverse",
+            "survival",#to use Cox Proportional Hazards Regression Models
+            "survminer",#Contains the function 'ggsurvplot()' for drawing easily beautiful and 'ready-to-publish' survival curves with the 'number at risk' table and 'censoring count plot'.
+            "coxme",#Mixed cox models
+            "gridExtra",#pour utiliser grid.arrange
+            "ggtext",#pour utiliser element_markdown
+            "performance",#Pour évaluer les modèles
+            "lme4",#Pour les modèles linéaire généralisés mixtes
+            "FactoMineR",#Statistiques exploratoires
+            "factoextra",#Statistiques exploratoires
+            "SurvMetrics",#La fonction CoxCompare calcule différents indices avec Survmetrics (most of the evaluation metrics for survival predictions)
+            "pec",
+            "ciTools",#Confidence or Prediction Intervals, Quantiles, and Probabilities for Statistical
+            "autoReg",#to extract results from survival fit
+            "emmeans",#Quantification of differences between groups in a model
+            "car",#statistiques
+            "MuMIn",#Evaluation and comparing models
+            "DHARMa",#residual diagnostics for hierarchical (multi-level/mixed) regression models #citation("DHARMa")
+            "glmmTMB",#To make zero inflated negative binomial regression
+            "raster",
+            "rworldxtra",
+            "rworldmap",
+            "rnaturalearth",
+            "rnaturalearthdata",
+            "stringr",
+            "sp",
+            "sf",
+            "germinationmetrics",#Calculations of germination indexes
+            "corrr",#function correlate
+            "ggnetwork",#to do traits correlation networks
+            "network",#to do traits correlation networks
+            "Hmisc",#rcorr for p value
+            "betareg",#for beta regression
+            "RVAideMemoire", #some functions coming from the guide of Hervé Maxime
+            "multcomp",#multiple comparison
+            "rsq",#R² of poisson GLM
+            "xlsx",#to export xlsx with several sheets
+            "metrica",#for scatterplot cross validation
+            "tidytext",#to use reorder_within because adding an interaction to betareg regression was making the graph unordered
+            "rstatix",#doing post hoc comparison on curves
+            "rcompanion",#use cldList for having letters when doing post hoc comparison on curves
+            "ggrepel",#utiliser geom_textrepel
+            "interactions",#utiliser interact_plot pour afficher les interactions d'un modèle
+            "condformat",#Format tables
+            "ggh4x",#to use facet_wrap2 and color facets
+            "DMwR",#unscale
+            "ggspatial",#north arrow on the map
+            "rgl",#plot3D
+            "jtools"#interact_plot
+            ))
+#remotes::install_version("DMwR", version="0.4.1")
+```
+
+#Climate Data import
+
+```{r Data import climate}
+#Can give up on mother since all its variables are correlated with genetic effect variables
+ClimateGenetBDD <- (read_excel("K:/Thèse/2_Expérimentations/Oaks/cork oak/Climate_Provenances.xlsx",sheet = "Genetic") %>% 
+  rename("Provenance"="ID"))[,c("Provenance","Tmax_spring","Pmean_spring","Tmean_annual","Trange_day","Isothermality","Tseasonality","Trange_annual","Pmean_annual","Pmax_annual", "Pmin_annual", "Pseasonality","Evapotranspiration", "ClimaticMoistureDeficit","Tmin_annual", "Pmean_GPowingSeason","Pmean_summer","Tmax_annual", "ChillingDD0", "GrowingDD5", "CoolingDD18", "FrostFreeDays", "DM_AridityIndex","E_PluviometricQuotient","RM_ThermicityIndex","AHM","SHM","TD","Tmin_30years")] %>%
+  group_by(Provenance) %>% 
+  summarise_all(mean)
+ClimateAcmatBDD <- (read_excel("K:/Thèse/2_Expérimentations/Oaks/cork oak/Climate_Provenances.xlsx",sheet = "AcornMaturation") %>% 
+  rename("Provenance"="ID"))[,c("Provenance","Tmax_spring","Pmean_spring","Tmean_annual","Trange_day","Isothermality","Tseasonality","Trange_annual","Pmean_annual","Pmax_annual", "Pmin_annual", "Pseasonality","Evapotranspiration", "ClimaticMoistureDeficit","Tmin_annual", "Pmean_GPowingSeason","Pmean_summer","Tmax_annual", "ChillingDD0", "GrowingDD5", "CoolingDD18", "FrostFreeDays", "DM_AridityIndex","E_PluviometricQuotient","RM_ThermicityIndex","AHM","SHM","TD","Tmin_30years")] %>% 
+  group_by(Provenance) %>% 
+  summarise_all(mean)
+colnames(ClimateAcmatBDD) <- paste0(colnames(ClimateAcmatBDD),"_Mat")
+ClimateMTreeBDD <- (read_excel("K:/Thèse/2_Expérimentations/Oaks/cork oak/Climate_Provenances.xlsx",sheet = "Mother") %>% 
+  rename("Provenance"="ID"))[,c("Provenance","Tmax_spring","Pmean_spring","Tmean_annual","Trange_day","Isothermality","Tseasonality","Trange_annual","Pmean_annual","Pmax_annual", "Pmin_annual", "Pseasonality","Evapotranspiration", "ClimaticMoistureDeficit","Tmin_annual", "Pmean_GPowingSeason","Pmean_summer","Tmax_annual", "ChillingDD0", "GrowingDD5", "CoolingDD18", "FrostFreeDays", "DM_AridityIndex","E_PluviometricQuotient","RM_ThermicityIndex","AHM","SHM","TD","Tmin_30years")] %>% 
+  group_by(Provenance) %>% 
+  summarise_all(mean)
+colnames(ClimateMTreeBDD) <- paste0(colnames(ClimateMTreeBDD),"_MTree")
+ClimateProv = ClimateGenetBDD %>% 
+  left_join(ClimateAcmatBDD %>% rename("Provenance" = "Provenance_Mat"),by = "Provenance") %>% 
+  left_join(ClimateMTreeBDD %>% rename("Provenance" = "Provenance_MTree"),by = "Provenance") %>% 
+  mutate(Population = case_when(Provenance == "Moliets et Maa" ~ "FRA_MoeMa",
+                                Provenance == "Padouen" ~ "FRA_Pad",
+                                Provenance == "Fuencaliente" ~ "SPA_Fue",
+                                Provenance == "Tuscania" ~ "ITA_Tus",
+                                Provenance == "Quinta de Serra" ~ "POR_QudSe",
+                                Provenance == "Tabarka" ~ "TUN_Tab",
+                                Provenance == "Fernana" ~ "TUN_Fer",
+                                Provenance == "Los Alcornocales" ~ "SPA_LoAl")) 
+ClimateProvScaled = ClimateProv %>% 
+  mutate_at(c("Tmax_spring","Pmean_spring","Tmean_annual","Trange_day","Isothermality","Tseasonality","Trange_annual","Pmean_annual","Pmax_annual", "Pmin_annual", "Pseasonality","Evapotranspiration", "ClimaticMoistureDeficit","Tmin_annual", "Pmean_GPowingSeason","Pmean_summer","Tmax_annual", "ChillingDD0", "GrowingDD5", "CoolingDD18", "FrostFreeDays", "DM_AridityIndex","E_PluviometricQuotient","RM_ThermicityIndex","AHM","SHM","TD","Tmin_30years",
+              "Tmax_spring_Mat", "Pmean_spring_Mat", "Tmean_annual_Mat", "Trange_day_Mat", "Isothermality_Mat", "Tseasonality_Mat", "Trange_annual_Mat", "Pmean_annual_Mat", "Pmax_annual_Mat", "Pmin_annual_Mat", "Pseasonality_Mat", "Evapotranspiration_Mat","ClimaticMoistureDeficit_Mat", "Tmin_annual_Mat", "Pmean_GPowingSeason_Mat", "Pmean_summer_Mat", "Tmax_annual_Mat", "ChillingDD0_Mat", "GrowingDD5_Mat", "CoolingDD18_Mat", "FrostFreeDays_Mat", "DM_AridityIndex_Mat", "E_PluviometricQuotient_Mat", "RM_ThermicityIndex_Mat", "AHM_Mat", "SHM_Mat","TD_Mat","Tmin_30years_Mat",
+              "Tmax_spring_MTree", "Pmean_spring_MTree", "Tmean_annual_MTree", "Trange_day_MTree", "Isothermality_MTree", "Tseasonality_MTree", "Trange_annual_MTree", "Pmean_annual_MTree", "Pmax_annual_MTree", "Pmin_annual_MTree", "Pseasonality_MTree", "Evapotranspiration_MTree","ClimaticMoistureDeficit_MTree", "Tmin_annual_MTree", "Pmean_GPowingSeason_MTree", "Pmean_summer_MTree", "Tmax_annual_MTree", "ChillingDD0_MTree", "GrowingDD5_MTree", "CoolingDD18_MTree", "FrostFreeDays_MTree", "DM_AridityIndex_MTree", "E_PluviometricQuotient_MTree", "RM_ThermicityIndex_MTree", "AHM_MTree", "SHM_MTree","TD_MTree","Tmin_30years_MTree"), funs(c(scale(.))))
+```
+
+Rivas-Martinex thermicity index: This is the sum in tenths of a degree de T (average annual temperature), m (average temperature of the minimums of the coldest month) and M (average temperature of the maximums of the coldest monthly period) It = (T+m+M) 10. It is therefore an index that considers the intensity of the cold, a limiting factor for many plants and plant communities, together with the average annual temperature. The correlation between the values of this index and the vegetation is quite satisfactory in warm and temperate climates. In cold climates with It or Itc values of less than 120, and in contental climates with an Ic > 21, it is more significant and precise to use the value of the positive annual temperature (Tp).
+
+Hargreaves climatic moisture deficit: sum of the monthly difference between a reference evaporation (Eref) and precipitation.
+
+De Martonne aridity index (1926): rend compte de l'aridité du climat, qui combine température moyenne et précipitations (l'influence de la température parait prédominer dans les hautes latitudes, celle des pluies vers l'équateur). Permet de savoir ce qu'un un climat sec, un mois sec, etc. ce qu'on ne peut faire avec les seules variables pluviométriques. 
+
+Quotient pluviométrique d'Emberger: Louis Emberger propose également le calcul d’un quotient, expression empirique de l’efficacité des pluies. Ce quotient pluviométrique ou indice climatique d'Emberger sert à définir les cinq différents types de climats méditerranéens, depuis le plus aride, jusqu'à celui de haute montagne. L'indice d'Emberger (1932) définit le degré d’humidité du climat. Il prend en compte les précipitations annuelles P, la moyenne des maxima de température du mois le plus chaud (M) et la moyenne des minima de température du mois le plus froid (m). Comme pour l'indice xérothermique de Gaussen, il est plus particulièrement adapté aux régions méditerranéennes dans lesquelles il permet de distinguer différents étages climatiques. Dans ces régions, Emberger a remarqué que l'amplitude thermique (M-m), donc l'évaporation, est un facteur important de la répartition des végétaux. On sait en effet que, à température moyenne égale, l'évaporation est d'autant plus grande que l'amplitude thermique est élevée. Le facteur de pluie pris en compte est le produit du nombre de jours de pluie par an (n) par le cumul moyen annuel (P).
+
+Annual heat moisture index: measure of aridity, Tmean_annual, Pmean_annual
+Summer heat moisture index: aridity in summer, Tmax_annual, Pmean_summer
+
+#Exploration to reduce climatic variable number
+
+```{r  ACP choose non correlated variable}
+ACP = PCA(ClimateProvScaled[,c("Provenance","Tmax_spring","Pmean_spring","Tmean_annual","Trange_day","Isothermality","Tseasonality","Trange_annual","Pmean_annual","Pmax_annual", "Pmin_annual", "Pseasonality","Evapotranspiration", "ClimaticMoistureDeficit","Tmin_annual", "Pmean_GPowingSeason","Pmean_summer","Tmax_annual", "ChillingDD0", "GrowingDD5", "CoolingDD18", "FrostFreeDays", "DM_AridityIndex","E_PluviometricQuotient","RM_ThermicityIndex","AHM","SHM","TD","Tmin_30years")], scale.unit =TRUE, ncp = 6, graph = F, quali.sup = c(1))#, quanti.sup=c(6,10), quali.sup = c(1,3)
+grid.arrange(
+  plot.PCA(ACP,axes=c(1,2), choix = "ind", habillage = "none", col.ind = "black",col.ind.sup="blue",col.quali = "magenta",label = c("ind","ind.sup","quali"), select = "cos2 10",unselect=0.9),#graphe individus
+  fviz_pca_var(ACP, axes = c(1, 2), col.quanti.sup = "blue", col.circle = "grey70",repel=T),#graphe variables
+  #fviz_pca_var(ACP, axes = c(2, 3), col.quanti.sup = "blue", col.circle = "grey70"),#graphe variables
+  #fviz_pca_var(ACP, axes = c(3, 4), col.quanti.sup = "blue", col.circle = "grey70"),#graphe variables
+  ncol = 2)
+
+fviz_pca_biplot(ACP, axes = c(1, 2), pointshape = 21, col.ind = "black", fill.ind = ClimateProvScaled$Provenance,  palette = OakPalette, fill.var = "white",label = c("var","quali.sup"), habillage = "none",legend.title = list(fill = "Type", color = "Provenance"),repel = T)
+
+fviz_eig(ACP, addlabels = TRUE, ylim = c(0, 50))#Graphe des éboulis
+```
+
+Variables to choose
+- Trange_day / Trange_annual / Tseasonality / (Isothermality)/ TD
+- Pmean_summer / Pmean_GPowingSeason / Pmin_annual
+- E_PluviometricQuotient 
+- Pmean_spring / DM_AridityIndex / Pmean_annual
+- Pmax_annual
+- Tmin_annual/Tmin_30years / FrostFreeDays / (Pmax_annual)
+- GrowingDD5 / ChillingDD0 / Tmean_annual
+- Pseasonality 
+- Thermicity Index / SHM
+- Cooling DD18 / Tmax_spring / Tmax_annual
+- ClimateMoistureDeficit / (AHM)
+- Evapotranspiration
+
+Change of strategy: too much variables for the models anyway even if we select. Let's try the indexes that are more integrated and take into account several variables. With indexes, models are way easier to build and better (residuals ok).
+
+ClimaticMoistureDeficit(evap, Pmean_annual)
+Tmax_spring?
+RM_ThermicityIndex (Tmean_annual, Tmin_annual) (but SHM and Pseasonality not the same even if correlated? - that's ok if there are not significant)
+DM_AridityIndex ou Pmean_spring?
+E_PluviometricQuotient
+Tseasonality
+
+```{r  ACP correlation climatic variables mother VS Acorn maturation VS provenance}
+#ACP correlation climatic variables mother VS provenance
+ACP = PCA(ClimateProvScaled[,c("Provenance","ClimaticMoistureDeficit","Tmax_spring", "RM_ThermicityIndex", "DM_AridityIndex","E_PluviometricQuotient","Tseasonality", "SHM","Pseasonality","ClimaticMoistureDeficit_MTree","Tmax_spring_MTree", "RM_ThermicityIndex_MTree", "DM_AridityIndex_MTree","E_PluviometricQuotient_MTree","Tseasonality_MTree", "SHM_MTree","Pseasonality_MTree")], 
+          scale.unit =TRUE, ncp = 6, graph = F, quali.sup = c(1))#, quanti.sup=c(6,10), quali.sup = c(1,3)
+grid.arrange(
+  plot.PCA(ACP,axes=c(1,2), choix = "ind", habillage = "none", col.ind = "black",col.ind.sup="blue",col.quali = "magenta",label = c("ind","ind.sup","quali"), select = "cos2 10",unselect=0.9),#graphe individus
+  fviz_pca_var(ACP, axes = c(1, 2), col.quanti.sup = "blue", col.circle = "grey70",repel=T),#graphe variables
+  ncol = 2)
+fviz_eig(ACP, addlabels = TRUE, ylim = c(0, 50))#Graphe des éboulis
+cor(ClimateProvScaled[,c("ClimaticMoistureDeficit","Tmax_spring", "RM_ThermicityIndex", "DM_AridityIndex","E_PluviometricQuotient","Tseasonality", "SHM","Pseasonality","ClimaticMoistureDeficit_MTree","Tmax_spring_MTree", "RM_ThermicityIndex_MTree", "DM_AridityIndex_MTree","E_PluviometricQuotient_MTree","Tseasonality_MTree", "SHM_MTree","Pseasonality_MTree")])
+
+#ACP correlation climatic variables acorn maturation VS provenance
+ACP = PCA(ClimateProvScaled[,c("Provenance","ClimaticMoistureDeficit","Tmax_spring", "RM_ThermicityIndex", "DM_AridityIndex","E_PluviometricQuotient","Tseasonality", "SHM","Pseasonality","ClimaticMoistureDeficit_Mat","Tmax_spring_Mat", "RM_ThermicityIndex_Mat", "DM_AridityIndex_Mat","E_PluviometricQuotient_Mat","Tseasonality_Mat", "SHM_Mat","Pseasonality_Mat")], 
+          scale.unit =TRUE, ncp = 6, graph = F, quali.sup = c(1))#, quanti.sup=c(6,10), quali.sup = c(1,3)
+grid.arrange(
+  plot.PCA(ACP,axes=c(1,2), choix = "ind", habillage = "none", col.ind = "black",col.ind.sup="blue",col.quali = "magenta",label = c("ind","ind.sup","quali"), select = "cos2 10",unselect=0.9),#graphe individus
+  fviz_pca_var(ACP, axes = c(1, 2), col.quanti.sup = "blue", col.circle = "grey70",repel=T),#graphe variables
+  ncol = 2)
+fviz_eig(ACP, addlabels = TRUE, ylim = c(0, 50))#Graphe des éboulis
+cor(ClimateProvScaled[,c("ClimaticMoistureDeficit","Tmax_spring", "RM_ThermicityIndex", "DM_AridityIndex","E_PluviometricQuotient","Tseasonality", "SHM","Pseasonality","ClimaticMoistureDeficit_Mat","Tmax_spring_Mat", "RM_ThermicityIndex_Mat", "DM_AridityIndex_Mat","E_PluviometricQuotient_Mat","Tseasonality_Mat", "SHM_Mat","Pseasonality_Mat")],)
+```
+Between Provenance variables and n and n-1 variables:
+All correlated except: Pmean_spring, Pmax_annual, and a little bit Pseasonality
+Between Provenance variables and mother tree variables:
+All correlated
+
+Let's remove Acorn maturation for now.
+ClimaticMoistureDeficit + Tmax_spring + RM_ThermicityIndex + DM_AridityIndex + E_PluviometricQuotient + Tseasonality + SHM + Pseasonality
+
+```{r  ACP choose non correlated variable}
+ACP = PCA(ClimateProvScaled[,c("Provenance","ClimaticMoistureDeficit", "Tmax_spring", "RM_ThermicityIndex", "DM_AridityIndex", "E_PluviometricQuotient", "Tseasonality")], scale.unit =TRUE, ncp = 6, graph = F, quali.sup = c(1))#, quanti.sup=c(6,10), quali.sup = c(1,3)
+grid.arrange(
+  plot.PCA(ACP,axes=c(1,2), choix = "ind", habillage = "none", col.ind = "black",col.ind.sup="blue",col.quali = "magenta",label = c("ind","ind.sup","quali"), select = "cos2 10",unselect=0.9),#graphe individus
+  fviz_pca_var(ACP, axes = c(1, 2), col.quanti.sup = "blue", col.circle = "grey70"),#graphe variables
+  #fviz_pca_var(ACP, axes = c(2, 3), col.quanti.sup = "blue", col.circle = "grey70"),#graphe variables
+  #fviz_pca_var(ACP, axes = c(3, 4), col.quanti.sup = "blue", col.circle = "grey70"),#graphe variables
+  ncol = 2)
+fviz_eig(ACP, addlabels = TRUE, ylim = c(0, 50))#Graphe des éboulis
+```
+
+1ère sélection: Tseasonality + Pmean_summer + Pmean_spring + Pmax_annual + Tmin_annual + Pseasonality + Tmax_spring + Pmean_spring_Mat + Pmax_annual_Mat
+2ème sélection: "ClimaticMoistureDeficit", "Tmax_spring", "RM_ThermicityIndex", "DM_AridityIndex", "Tseasonality", "SHM", "Pseasonality"
+
+Then, still multicollinearity, choices to makK:
+Aridity Index or Pluviometric Quotient
+ClimaticMoistureDeficit or Tseasonality
+Aridity Index or Climatic Moisture Deficit
+
+We remove Pluviometric Quotient, because increase vif in all models.
+Aridity index and climatic moisture deficit can be ok in the same model, but there are anticorrelated so they still bring the same kind of information.
+FINAL CHOICK:
+Water stress + spring temperature + temperature seasonality + Cold intensity
+ClimaticMoistureDeficit + Tmax_spring + Tseasonality + RM_ThermicityIndex
+We choose CMD over aridity index because CMD explain more germination than aridity index (models compared).
+
+
+#Color code
+
+The color code (which color for which population) has been done according to the population variable that was shaping the best germination dynamic. Cox models have been built, then run to do predictions. Several color codes have tested for each population variable, and summaries and Anova table of the models have been analyzed.
+This led to the following color code, according to Rivaz-Martinez Thermicity index.
+
+```{r Which colors to summarise/represent populations}
+RM_ThermicityIndex_tab = data.frame(unique(ClimateProv[,c("Population","RM_ThermicityIndex")])) %>% 
+  arrange(-RM_ThermicityIndex)
+#Climate_tab = data.frame(unique(ClimateProv[,c("Population","DM_AridityIndex")])) %>% 
+#arrange(-DM_AridityIndex) %>% 
+#mutate(DM_AridityQuali = ifelse(DM_AridityIndex>20 & DM_AridityIndex<30,"Subhumid",ifelse(DM_AridityIndex>30 & DM_AridityIndex<60,"Humid","")))
+#CMD_tab = data.frame(unique(ClimateProv[,c("Population","ClimaticMoistureDeficit")])) %>% 
+  #arrange(-ClimaticMoistureDeficit)
+RM_Tseason_tab = data.frame(unique(ClimateProv[,c("Population","Tseasonality")])) %>% 
+  arrange(-Tseasonality)
+#RM_Tmax_spring_tab = data.frame(unique(ClimateProv[,c("Population","Tmax_spring")])) %>% 
+  #arrange(-Tmax_spring)
+#I tested also Tmin_annual and Tmean_annual. It almost works with Tmean_annual (order close to thermicity index) but not Tmin.
+#Thermicity index is indeed the right choice.
+
+#Thermicity index takes into account annual temperature and minimum temperatures. Note that summer temperature is not explicitely in our models then.
+OakPalette = c("TUN_Tab" = "#D55E00", "SPA_LoAl" = "#E69F00", "TUN_Fer" = "#F0E442", "POR_QudSe" = "#D0D600", "SPA_Fue" = "#009E73", "ITA_Tus" = "#56B4E9", "FRA_MoeMa" = "#0072B2", "FRA_Pad" = "#CC79A7")#according to Thermicity index
+```
+
+#Map of Cork oak populations
+
+```{r Map Cork oak populations}
+Prov_coord = read.csv2("K:/Thèse/2_Expérimentations/Oaks/Cork oak/Provenances coordinates.csv",dec=".") %>% 
+  mutate(Population = case_when(provenance == "Moliets et Maa" ~ "FRA_MoeMa",
+                                provenance == "Padouen" ~ "FRA_Pad",
+                                provenance == "Fuencaliente" ~ "SPA_Fue",
+                                provenance == "Tuscania" ~ "ITA_Tus",
+                                provenance == "Quinta de Serra" ~ "POR_QudSe",
+                                provenance == "Tabarka" ~ "TUN_Tab",
+                                provenance == "Fernana" ~ "TUN_Fer",
+                                provenance == "Los Alcornocales" ~ "SPA_LoAl",))
+Distribution_area = read_sf("K:/Thèse/3_Analyses & Modélisation/chorological_maps_dataset/Quercus suber/shapefiles/Quercus_suber_plg_clip.shp")
+world <- ne_countries(scale = "medium", returnclass = "sf")
+
+ggplot(data = world) +
+  geom_sf(fill="white") +
+  geom_sf(data = Distribution_area, fill="green", alpha = 0.3) +
+  #geom_sf_text(aes(label = stringr::str_wrap(name, 1)), size = 3)+
+  geom_point(data = Prov_coord, aes(x = longitude, y = latitude, fill = Population), size = 6, shape = 21) +
+  scale_fill_manual(values = OakPalette, breaks=Prov_coord[,c("Population")])+
+  geom_text_repel(data = Prov_coord, aes(x = longitude, y = latitude,label=as.character(Population)),hjust=-0.1,vjust=0.2,size=6)+
+  coord_sf(xlim = c(-12, 25), ylim = c(33, 55), expand = FALSE)+
+  theme_bw()+
+  theme(axis.title=element_text(size=18),axis.text=element_text(size=16),legend.position ="none")+ xlab("Longitude")+ ylab("Latitude")+
+  annotation_scale(location = "tr", width_hint = 0.5,text_cex = 1)+
+  annotation_north_arrow(location = "tr", pad_x = unit(0.4, "in"), pad_y = unit(0.4, "in"), style = ggspatial::north_arrow_nautical(fill = c("grey40", "white"),line_col = "grey20",text_family = "ArcherPro Book"))
+```
+
+```{r Population localisation within the cork oak climatic enveloppe}
+ClimEnveloppe <- read.csv("K:/Thèse/2_Expérimentations/Oaks/cork oak/Building climatic raster on cork oak area/Climatic enveloppe Distribution area.csv",sep = ";") %>% 
+  group_by(ID) %>% 
+  summarise_all(mean) %>% 
+  mutate(ID = "Cork oak climatic enveloppe")
+colnames(ClimEnveloppe) = c("Provenance","Longitude","Latitude","Elevation","Year","Tseasonality","ClimaticMoistureDeficit","RM_ThermicityIndex")
+
+ClimEnveloppeProv = ClimEnveloppe[,c("Provenance","Tseasonality","ClimaticMoistureDeficit","RM_ThermicityIndex")] %>% 
+  rbind(ClimateProv[,c("Provenance","Tseasonality","ClimaticMoistureDeficit","RM_ThermicityIndex")]) %>% mutate(Population = case_when(Provenance == "Moliets et Maa" ~ "FRA_MoeMa",
+                                Provenance == "Padouen" ~ "FRA_Pad",
+                                Provenance == "Fuencaliente" ~ "SPA_Fue",
+                                Provenance == "Tuscania" ~ "ITA_Tus",
+                                Provenance == "Quinta de Serra" ~ "POR_QudSe",
+                                Provenance == "Tabarka" ~ "TUN_Tab",
+                                Provenance == "Fernana" ~ "TUN_Fer",
+                                Provenance == "Los Alcornocales" ~ "SPA_LoAl",
+                                Provenance == "Cork oak climatic enveloppe" ~ "Cork oak climatic enveloppe"))
+
+ClimEnvPalette = c("TUN_Tab" = "#D55E00", "SPA_LoAl" = "#E69F00", "TUN_Fer" = "#F0E442", "POR_QudSe" = "#D0D600", "SPA_Fue" = "#009E73", "ITA_Tus" = "#56B4E9", "FRA_MoeMa" = "#0072B2", "FRA_Pad" = "#CC79A7","Cork oak climatic enveloppe"="green")
+ClimEnvPaletteExt <- ClimEnvPalette[ClimEnveloppeProv$Population]
+ClimEnvSize = c("Tabarka" = 3, "Los Alcornocales" = 3, "Fernana" = 3, "Quinta de Serra" = 3, "Fuencaliente" = 3, "Tuscania" = 3, "Moliets et Maa" = 3, "Padouen" = 3,"Cork oak climatic enveloppe"=1.5)
+ClimEnvSizeExt <- ClimEnvSize[ClimEnveloppeProv$Provenance]
+ClimEnvAlpha = c("Tabarka" = 1, "Los Alcornocales" = 1, "Fernana" = 1, "Quinta de Serra" = 1, "Fuencaliente" = 1, "Tuscania" = 1, "Moliets et Maa" = 1, "Padouen" = 1,"Cork oak climatic enveloppe"=0.3)
+ClimEnvAlphaExt <- ClimEnvAlpha[ClimEnveloppeProv$Provenance]
+
+par3d(cex=3)
+#plot3d(ClimEnveloppeProv$RM_ThermicityIndex, ClimEnveloppeProv$ClimaticMoistureDeficit, ClimEnveloppeProv$Tseasonality, col = ClimEnvPaletteExt, size = ClimEnvSizeExt, type = "s",alpha = ClimEnvAlphaExt,xlab = "R-M Thermicity Index", ylab = "Climatic Moisture Deficit", zlab = "Temperature Seasonality",box=F) 
+plot3d(ClimEnveloppeProv$RM_ThermicityIndex, ClimEnveloppeProv$ClimaticMoistureDeficit, ClimEnveloppeProv$Tseasonality, col = ClimEnvPaletteExt, size = ClimEnvSizeExt, type = "s",alpha = ClimEnvAlphaExt,xlab = "", ylab = "", zlab = "",box=F) #no axis title
+
+legend3d("topright", legend = names(ClimEnvPalette), col = ClimEnvPalette, pch = 16)
+
+ggplot()+
+  geom_point(aes(x=ClimaticMoistureDeficit,y=RM_ThermicityIndex,fill=Population),color="black",data=filter(ClimEnveloppeProv,Population == "Cork oak climatic enveloppe"),shape=21,size=5)+
+  geom_point(aes(x=ClimaticMoistureDeficit,y=RM_ThermicityIndex,fill=Population),color="black",data=filter(ClimEnveloppeProv,Population != "Cork oak climatic enveloppe"),shape=21,size=10)+
+  scale_fill_manual(values = ClimEnvPalette)+
+  theme_bw()+ylab("Rivas-Martínez Thermicity Index")+xlab("Climatic Moisture Deficit")+
+  theme(axis.text=element_text(size=30),axis.title=element_text(size=35),legend.title=element_text(size=18),legend.text=element_text(size=15))
+ggplot()+
+  geom_point(aes(x=Tseasonality,y=RM_ThermicityIndex,fill=Population),color="black",data=filter(ClimEnveloppeProv,Population == "Cork oak climatic enveloppe"),shape=21,size=5)+
+  geom_point(aes(x=Tseasonality,y=RM_ThermicityIndex,fill=Population),color="black",data=filter(ClimEnveloppeProv,Population != "Cork oak climatic enveloppe"),shape=21,size=10)+
+  scale_fill_manual(values = ClimEnvPalette)+
+  theme_bw()+ylab("Rivas-Martínez Thermicity Index")+xlab("Temperature seasonality")+
+  theme(axis.text=element_text(size=30),axis.title=element_text(size=35),legend.title=element_text(size=18),legend.text=element_text(size=15))
+```
+
+#Germination Data import
+
+```{r Data import germination}
+'%notin%' <- Negate('%in%')
+#Germination data
+BDDQuSub <- read_excel("K:/Thèse/2_Expérimentations/Oaks/Cork oak/BDD_Quercus suber_2023.xlsx")
+Germination = BDDQuSub %>% 
+  dplyr::select(Provenance,Country,Longitude,Latitude,Collection_date,Id_mother,proxi_poids,DBH,Id_seed,Species,Date_semis,Day_temperature,Night_temperature,Germination,Germination_date,Germination_time) %>% 
+  dplyr::mutate(Germination_time = as.numeric(Germination_time), Germination = as.numeric(Germination),
+                Germination_date = as.numeric(Germination_date),
+                Id_mother = as.character(paste(Provenance,"_",Id_mother),sep=""),
+                Storage = as.numeric(Date_semis - Collection_date),
+                DBH = as.numeric(DBH),
+                Germination_date = format(as.Date(Germination_date, origin = "1899/12/30"),format = "%d/%m/%Y")) %>% #format de la date
+  mutate(Population = case_when(Provenance == "Moliets et Maa" ~ "FRA_MoeMa",
+                                Provenance == "Padouen" ~ "FRA_Pad",
+                                Provenance == "Fuencaliente" ~ "SPA_Fue",
+                                Provenance == "Tuscania" ~ "ITA_Tus",
+                                Provenance == "Quinta de Serra" ~ "POR_QudSe",
+                                Provenance == "Tabarka" ~ "TUN_Tab",
+                                Provenance == "Fernana" ~ "TUN_Fer",
+                                Provenance == "Los Alcornocales" ~ "SPA_LoAl")) %>% 
+  filter(!is.na(Day_temperature)) %>% 
+  group_by(Provenance,Day_temperature,Id_mother) %>% 
+  dplyr::mutate(RoundAcornMass = round(mean(proxi_poids)))
+```
+
+#Germination indexes calculations
+
+Which variables characterize germination ?
+There are at least four conceptually distinct properties of the temporal pattern of germination that must be quantified in order to fully characterize it: delay, extent, average speed and variation in speed of germination (McNair et al, 2012) That is to say Time, percentage, and synchrony : germinability/germination rate/percentage, mean germination time, germination synchrony (MA Ranal and Santana, 2006).
+- Germination percentage GP
+- Mean Germination Time MGT
+- Germination Synchrony GS
+
+A lot of germination indexes are not by acorns but by groups of provenance (calculated on 45 acorns) and/or chamber temperature (calculated on 15 acorns) and/or mother tree (calculated on 5 acorns).
+Let's calculate them by provenance, temperature and mother.
+
+```{r Germination indexes calculations}
+GermIndexesRate = Germination[,c("Provenance","Population","Day_temperature","Night_temperature","Germination","Germination_time","proxi_poids","Id_mother")] %>%
+  group_by(Population, Provenance, Day_temperature,Night_temperature,Id_mother) %>%
+  dplyr::mutate(NbSeeds = n(),
+                GP = GermPercent(germ.counts = Germination, total.seeds = mean(NbSeeds), partial = TRUE)/100,#germination percentage
+                AM = mean(proxi_poids))#Mean acorn mass
+GermIndexesTime = GermIndexesRate %>% 
+  filter(Germination == 1) %>% 
+  dplyr::mutate(NbSeedsGerm = n()) %>% 
+  filter(NbSeedsGerm>2) %>% #remove mother with less than 2 seeds germinated
+  group_by(Population, Day_temperature, Night_temperature,Id_mother, Germination_time) %>% 
+  summarise(across(Germination, sum), across(c(proxi_poids,NbSeeds,GP,AM,NbSeedsGerm), mean)) %>%  
+  group_by(Population, Day_temperature, Night_temperature,Id_mother) %>% 
+  dplyr::mutate(MGT = MeanGermTime(germ.counts = Germination, intervals = Germination_time, partial = TRUE),#Mean Germination Time
+                GS = GermSynchrony(germ.counts = Germination, intervals = Germination_time, partial = TRUE),#Germination synchrony
+                #Other indexes
+                #CvGT = CVGermTime(germ.counts = Germination, intervals = Germination_time, partial = TRUE),#Coefficient of variation of the germination time
+                #T50 = t50(germ.counts = Germination, intervals = Germination_time, partial = TRUE, method = c("coolbear", "farooq")),#median germination time
+                #CUG = CUGerm(germ.counts = Germination, intervals = Germination_time, partial = TRUE),#Coefficient of uniformity of germination
+                #FGT = FirstGermTime(germ.counts = Germination, intervals = Germination_time, partial = TRUE),#Time of first germination
+                #LGT = LastGermTime(germ.counts = Germination, intervals = Germination_time, partial = TRUE),#Time of last germination
+                #SGT = TimeSpreadGerm(germ.counts = Germination, intervals = Germination_time, partial = TRUE),#Time spread of germination
+                #PGT = PeakGermTime(germ.counts = Germination, intervals = Germination_time, partial = TRUE),#Peak time of germination
+                #GV = GermSpeed(germ.counts = Germination,intervals = Germination_time, partial = TRUE, percent = FALSE, total.seeds = NULL),#Speed of germination / Germination rate index 
+                #GU = GermUncertainty(germ.counts = Germination,intervals = Germination_time, partial = TRUE),#Synchronization index or Uncertainty of the germination process
+                #MGP = MeanGermRate(germ.counts = Germination,intervals = Germination_time, partial = TRUE),#Mean germination rate
+                #CVeG = CVG(germ.counts = Germination,intervals = Germination_time, partial = TRUE)#Coefficient of velocity
+                ) 
+
+GerminationTraits = unique(GermIndexesRate[,c("Provenance", "Population", "Day_temperature", "Night_temperature", "Id_mother", "GP", "AM")]) %>% 
+  left_join(unique(GermIndexesTime[,c("Population", "Day_temperature", "Night_temperature", "Id_mother", "MGT", "GS")]),by=c("Population", "Day_temperature", "Night_temperature", "Id_mother"))
+```
+
+#Climate and Germination Data merge
+
+```{r Merge climate germination}
+#scale to reduce / avoid multicollinearity and to ensure that all variables contribute equally to the analysis and to prevent issues like numerical instability or disproportionate influence of certain features. 
+
+GerminationScaled = Germination %>% mutate(proxi_poids = scale(proxi_poids), DBH = scale(DBH)) %>% left_join(ClimateProvScaled[,c("Provenance","ClimaticMoistureDeficit", "RM_ThermicityIndex", "DM_AridityIndex", "E_PluviometricQuotient", "Tseasonality", "SHM", "Pseasonality", "Pmean_summer", "Pmax_annual", "Tmean_annual", "Tmin_annual")],by="Provenance") %>% 
+  left_join(ClimateProv[,c("Provenance","Tmax_spring")],by="Provenance")
+GerminationScaled$Day_temperature = scale(as.numeric(GerminationScaled$Day_temperature))
+GerminationScaled$Tmax_spring = scale(as.numeric(GerminationScaled$Tmax_spring))
+
+Germination = Germination %>% left_join(ClimateProv[,c("Provenance","ClimaticMoistureDeficit", "Tmax_spring", "RM_ThermicityIndex", "DM_AridityIndex", "E_PluviometricQuotient", "Tseasonality", "SHM", "Pseasonality")],by="Provenance")
+
+GerminationTraitsScaled = GerminationTraits[,c("Provenance","Population","Id_mother","GP","MGT","GS","Day_temperature","Night_temperature")] %>%  cbind(data.frame(AM = scale(GerminationTraits$AM))) %>%  left_join(ClimateProvScaled[,c("Provenance","ClimaticMoistureDeficit", "RM_ThermicityIndex", "DM_AridityIndex", "E_PluviometricQuotient", "Tseasonality", "SHM", "Pseasonality","Pmean_summer","Pmax_annual","Tmean_annual","Tmin_annual")],by="Provenance") %>% 
+  left_join(ClimateProv[,c("Provenance","Tmax_spring")],by="Provenance")
+GerminationTraitsScaled = GerminationTraitsScaled %>% ungroup() %>% mutate(Id=1:nrow(GerminationTraitsScaled))
+GerminationTraitsScaled$Day_temperature = scale(as.numeric(GerminationTraitsScaled$Day_temperature))
+GerminationTraitsScaled$Tmax_spring = scale(as.numeric(GerminationTraitsScaled$Tmax_spring))
+
+BothScaled = Germination[,c("Provenance","Id_mother","Id_seed","Germination","Night_temperature")] %>% cbind(data.frame(proxi_poids = scale(Germination$proxi_poids),DBH = scale(Germination$DBH),Germination_time = scale(Germination$Germination_time),RoundAcornMass = scale(Germination$RoundAcornMass))) %>%
+  left_join(GerminationTraitsScaled,by=c("Provenance","Id_mother","Night_temperature"))
+```
+
+#Characterization of populations with climatic variables 
+
+```{r  ACP ALL}
+ACP = PCA(filter(BothScaled[,c("Population","GP","MGT","GS","Tmax_spring","ClimaticMoistureDeficit","RM_ThermicityIndex","Tseasonality")],
+                 !is.na(MGT)), scale.unit =TRUE, ncp = 6, graph = F, quali.sup = c(1))
+
+ACPVarPalette = c("Trait" = "black", "Water stress" = "#004488","Spring temperature" = "#CD3E4E","Temperature seasonality" = "#882255","Temperature (minimal, \n annual and spring)" = "#CD3E4E")
+
+BothScaled$Population <- factor(BothScaled$Population , levels=c("TUN_Tab", "SPA_LoAl", "TUN_Fer", "POR_QudSe", "SPA_Fue", "ITA_Tus", "FRA_MoeMa", "FRA_Pad"))#order population level
+#grid.arrange(
+fviz_pca_biplot(ACP, axes = c(1, 2), pointshape = 21, pointsize = 3, col.ind = "black", fill.ind = filter(BothScaled[,c("Population","GP","MGT","GS","Tmax_spring","ClimaticMoistureDeficit","RM_ThermicityIndex","Tseasonality")],
+                                                                                           !is.na(MGT))$Population,  palette = OakPalette, fill.var = "white",label = c("var","quali.sup"), habillage = "none",legend.title = list(color = "Type", fill = "Population"),repel = T,col.var = factor(c("Trait","Trait","Trait","Spring temperature","Water stress","Temperature (minimal, \n annual and spring)","Temperature seasonality")),labelsize = 8)+
+  scale_color_manual(values = ACPVarPalette)+theme_bw()+
+  theme(legend.spacing.y = unit(0.3, 'cm'),text = element_text(size = 20),axis.title = element_text(size = 15),axis.text = element_text(size = 10)) + guides(fill = guide_legend(byrow = TRUE),color = guide_legend(byrow = TRUE))#,
+#fviz_pca_biplot(ACP, axes = c(1, 3), pointshape = 21, col.ind = "black", fill.ind = filter(BothScaled[,c("Population","GP","Germination_time","MGT","GS","CvGT","Tmax_spring","ClimaticMoistureDeficit","RM_ThermicityIndex","Tseasonality")],!is.na(Germination_time) & !is.na(MGT))$Population,  palette = OakPalette, fill.var = "white",label = c("var","quali.sup"), habillage = "none",legend.title = list(color = "Type", fill = "Population"),repel = T,col.var = factor(c("Trait","Trait","Trait","Trait","Trait","Spring temperature","Water stress","Cold intensity and \n annual temperature","Temperature seasonality")))+ 
+#scale_color_manual(values = ACPVarPalette),
+#nrow = 1)
+fviz_eig(ACP, addlabels = TRUE, ylim = c(0, 50))#Graphe des éboulis
+```
+
+#General models and specific Population models on each Trait
+
+1) General models on each trait: 
+  Trait ~ Population + Day_temperature + Population:Day_temperature
+2) Specific models on each traits:
+  GP / G(0,1) ~ Population climatic variables
+GS ~ Population climatic variables
+MGT / GT ~ Population climatic variables + Day_temperature + Population climatic variables:Day_temperature
+
+```{r  Models assumptions checking}
+#The interpretation of conventional residuals for generalized linear (mixed) and other hierarchical statistical models is often problematic. 
+#(usual rules for interpreting residuals plot do not apply - This is the appearance you expect of such a plot when the dependent variable is discrete. https://stats.stackexchange.com/questions/25068/interpreting-plot-of-residuals-vs-fitted-values-from-poisson-regression)
+# --> DHARMa package https://cran.r-project.org/web/packages/DHARMa/vignettes/DHARMa.html
+ResidualsOutput = simulateResiduals(fittedModel = Model, plot = F,quantreg=T)#first calculate residuals
+plot(ResidualsOutput)#Scaled residuals plot
+vif(Model)
+plotresid(Model)#independance and variance (and normality if normal based model)
+#you can also use it to plot residuals against a specific other predictors (highly recommend).
+plotResiduals(ResidualsOutput, GerminationT$RM_ThermicityIndex)
+testDispersion(ResidualsOutput)
+#Visual global check of model assumptions (some are classic residuals graphs that must not be interpreted)
+#windows(width = 12, height = 10)
+check_model(Model) ; vif(Model)
+```
+
+```{r  Stepwise selection}
+options(na.action = "na.fail") # Required for dredge to run
+ModelSelection <- dredge(Model, rank = AIC, evaluate = T, extra = c(R2m = function(x) r.squaredGLMM(x)[1,1], R2c = function(x) r.squaredGLMM(x)[1,2]))
+#or
+ModelSelection <- dredge(Model, rank = AIC, evaluate = T)
+options(na.action = "na.omit")
+get.models(ModelSelection, subset = 1)[[1]]
+summary(model.avg(ModelSelection, subset = delta <= 1))
+```
+
+##Germination probability (Cox models)
+
+```{r Germination Curves on raw data}
+#Dataframe nombre de graines
+NbSeeds = Germination[,c("Population","Day_temperature","Id_seed")] %>% 
+  dplyr::mutate(compteur = 1) %>% 
+  group_by(Day_temperature, Population) %>%
+  dplyr::summarise(Nb_SeedsProv = sum(compteur)) %>%
+  group_by(Day_temperature) %>% 
+  dplyr::mutate(Nb_Seeds = sum(Nb_SeedsProv))
+#Graphe cumulatif des germinations au fur et à mesure du temps
+CumulGerminDay = filter(Germination, !is.na(Germination_date)) %>%
+  left_join(NbSeeds[,c("Day_temperature", "Population", "Nb_SeedsProv")], by = c( "Day_temperature", "Population")) %>% 
+  left_join(unique(NbSeeds[,c("Day_temperature", "Nb_Seeds")]), by = c("Day_temperature")) %>%
+  group_by(Day_temperature, Germination_date, Germination_time, Nb_SeedsProv, Population) %>% 
+  dplyr::summarise(Nb_germ = sum(Germination)) %>% 
+  arrange(Day_temperature, Population,Germination_time) %>% 
+  group_by(Day_temperature,Population) %>% 
+  dplyr::mutate(Nb_germCumul = cumsum(Nb_germ),
+                Perc_germCumul = Nb_germCumul/Nb_SeedsProv) %>% 
+  group_by(Day_temperature, Germination_date, Germination_time,Population) %>% #Pour avoir un résultat par jour et éviter les doublons
+  dplyr::summarise(Nb_germCumul = max(Nb_germCumul),Perc_germCumul = max(Perc_germCumul)) %>% 
+  arrange(Day_temperature, Population,Germination_time)
+#Courbes de germination données brutes
+ggplot(CumulGerminDay, aes(Germination_time, Perc_germCumul))+
+  geom_point()+ geom_smooth(span = 1, aes(color = Population, fill = Population),size=1.5) + ylim(0,1) + xlim(0,50)+
+  scale_color_manual(values = OakPalette,breaks=CMD_tab[,c("Population")])+
+  scale_fill_manual(values = OakPalette,breaks=CMD_tab[,c("Population")])+
+  xlab("Germination time")+ ylab("Germination rate")+
+  theme_bw()+
+  theme(plot.title = element_markdown(box.color = "black", color = "white", fill = "darkgreen", hjust = 0.5, linewidth = 0.5, r = unit(0, "mm"), linetype = 1, padding = unit(2, "mm")),axis.title = element_text(size = 30),axis.text = element_text(size = 20),strip.text = element_text(size = 20))+ guides(fill="none")+
+  facet_wrap(~paste(Day_temperature, " °C"),nrow = 3)
+ggplot(CumulGerminDay, aes(Germination_time, Perc_germCumul))+
+  geom_point()+ geom_smooth(span = 1, aes(color = as.factor(Day_temperature), fill = as.factor(Day_temperature))) + ylim(0,1) +
+  scale_fill_manual(values = c("15" = "#3399FF", "20" = "#009900", "25" = "#CC3333"))+
+  scale_color_manual(values = c("15" = "#3399FF", "20" = "#009900", "25" = "#CC3333"))+
+  xlab("Germination time")+ ylab("Germination rate")+
+  theme_bw()+
+  theme(plot.title = element_markdown(box.color = "black", color = "white", fill = "darkgreen", hjust = 0.5, linewidth = 0.5, r = unit(0, "mm"), linetype = 1, padding = unit(2, "mm")))+ guides(fill="none")+
+  facet_wrap(~ Population, nrow = 2)
+```
+
+```{r General cox model run and total predictions}
+#Coxfit = coxph(Surv(Germination_time, Germination) ~ Population + Population:Day_temperature + Day_temperature + proxi_poids + proxi_poids:Population, data=Germination, robust = TRUE)#Tmax_spring not necessary (AIC remains the same). Mother tree increase the AIC and RoundAcornmass decrease it so we remove Mother tree and keep RoundAcornMass (Mean acorn mass per mother)
+Coxfit = coxph(Surv(Germination_time, Germination) ~ Population + Population:as.factor(Day_temperature) + as.factor(Day_temperature) + proxi_poids + proxi_poids:Population, data=Germination, robust = TRUE)
+#Assumptions/hypothesis checking
+test.ph = cox.zph(Coxfit)#checking proportional Hazards assumption #not assumed on the entire date, but assumed on a sample --> ok ?
+summary(Coxfit)
+Ano = data.frame(car::Anova(Coxfit))
+Covar_val = unique(Germination[,c("Population","Day_temperature","RoundAcornMass","proxi_poids")])
+Survivalfit = survfit(Coxfit, newdata = Covar_val)
+
+#Predictions per population, chamber and mother/RoundAcornMass
+Predict_extractTOT = survfit2df(Survivalfit) %>% 
+  left_join(cbind(Covar_val,row.names(Covar_val)) %>% rename("strata"="...5"),by = "strata") %>% 
+  mutate(PH = cox.zph(Coxfit)[["table"]][6,3],
+         surv = 1 - surv,
+         lower = 1 - lower,
+         upper = 1 - upper,
+         Chisq_Prov = c(round(Ano[1,1],2)),
+         Chisq_dayT = c(round(Ano[2,1],2)),
+         Chisq_AM = c(round(Ano[3,1],2)),
+         pval_Prov = Ano[1,3],
+         pval_dayT = Ano[2,3],
+         pval_AM = Ano[3,3])
+```
+
+```{r Cox model Predictions}
+#Population within day_t
+Predict_extractProv = Predict_extractTOT %>% group_by(Population,Day_temperature,time) %>% summarise_at(vars(surv, lower,upper,pval_Prov,Chisq_Prov), funs(mean)) %>% 
+  dplyr::mutate(pval_Prov = ifelse(pval_Prov<0.001, "<0.001",as.character(round(pval_Prov,3)))) 
+
+#Pairwise comparisons
+EMMP = emmeans(Coxfit, ~ Population | Day_temperature, mode="link")
+CompMultP = back.emmeans(EMMP,n=120)  ; colnames(CompMultP) = c("Tosep","SE_inf","EMMean","SE_sup")  ; CompMultP = separate(CompMultP, col = "Tosep", into = c("Population","Day_temperature"), sep = ":", extra = "merge") %>% group_by(Day_temperature) %>% arrange(EMMean)
+CompMultP = CompMultP %>% left_join(cld(EMMP, adjust = "tukey", Letters = LETTERS)[,c("Day_temperature","Population",".group")] %>% mutate(Day_temperature = as.character(Day_temperature)), by = c("Day_temperature","Population")) %>% group_by(Day_temperature) %>% mutate(Population = factor(Population, levels = unique(Population)))
+ggplot(data = CompMultP,aes(x=reorder(Day_temperature, EMMean),y=EMMean, group = reorder_within(Population, EMMean, Day_temperature), color=Population))+
+  geom_point(position=position_dodge(width=0.9), size = 3)+
+  geom_errorbar(aes(ymin = SE_inf, ymax = SE_sup), position=position_dodge(width=0.9),size = 2)+
+  geom_text(aes(label = CompMultP$.group,GPoup = reorder_within(Population, EMMean, Day_temperature), color=Population,y=SE_inf-0.05), position=position_dodge(width=0.9), size = 6) +
+  scale_color_manual(name = "Population",values = OakPalette, breaks=RM_ThermicityIndex_tab[,c("Population")]) +
+  xlab("Day_temperature")+ylab("Germination probability")+
+  theme_bw() + theme(axis.text=element_text(size=25),axis.title = element_text(size = 30), legend.text = element_text(size=20),legend.title = element_text(size=25),legend.key.size = unit(1.5, 'cm'))
+
+ggplot()+
+  geom_line(data = Predict_extractProv, size = 1.5,aes(x = time, y = surv, color = Population))+#geom_smooth(size = 1, se=F)+
+  scale_color_manual(values = OakPalette,breaks=RM_ThermicityIndex_tab[,c("Population")])+
+  geom_hline(yintercept=0.5, linetype="dashed", color = "black", size = 1)+
+  geom_ribbon(data = Predict_extractProv, aes(ymin = lower, ymax = upper, fill = Population,x = time, y = surv), alpha = 0.2,colour = NA)+
+  scale_fill_manual(values = OakPalette, breaks=RM_ThermicityIndex_tab[,c("Population")])+
+  xlab("Time")+ylab("Germination probability (percentage)")+
+  theme_bw() +
+  geom_text_repel(aes(label = Group,x = time, y = surv, color = Population), size = 7, fontface = "bold",
+                  data = CompMultP[,c("Population","Day_temperature",".group")] %>% 
+                    mutate(Day_temperature = as.numeric(Day_temperature)) %>% 
+                    left_join(filter(Predict_extractProv[,c("Population","Day_temperature","time","surv")],surv<0.95 & surv > 0.80), by=c("Population","Day_temperature")) %>% 
+                    distinct(Population, Day_temperature, .keep_all = TRUE) %>% 
+                    mutate(Group = as.character(.group)))+
+  theme(axis.title = element_text(size = 35),axis.text = element_text(size = 30),strip.text = element_text(size = 30),legend.title=element_text(size=18),legend.text=element_text(size=15))+
+  facet_wrap(~ Day_temperature, nrow = 3)
+
+#day_t within Population
+Predict_extractDayT = Predict_extractTOT %>% group_by(Population,Day_temperature,time) %>% summarise_at(vars(surv, lower,upper,pval_dayT,Chisq_dayT), funs(mean)) %>% 
+  dplyr::mutate(pval_dayT = ifelse(pval_dayT<0.001, "<0.001",as.character(round(pval_dayT,3))))
+
+#Pairwise comparisons
+EMMP = emmeans(Coxfit, ~ Day_temperature | Population, mode="link")
+CompMultP = back.emmeans(EMMP,n=120)  ; colnames(CompMultP) = c("Tosep","SE_inf","EMMean","SE_sup")  ; CompMultP = separate(CompMultP, col = "Tosep", into = c("Day_temperature","Population"), sep = ":", extra = "merge") %>% group_by(Population) %>% arrange(EMMean)
+CompMultP = CompMultP %>% left_join(cld(EMMP, adjust = "tukey", Letters = LETTERS)[,c("Population","Day_temperature",".group")] %>% mutate(Day_temperature = as.character(Day_temperature)), by = c("Population","Day_temperature")) %>% group_by(Population) %>% mutate(Day_temperature = factor(Day_temperature, levels = unique(Day_temperature)))
+ggplot(data = CompMultP,aes(x=reorder(Population, EMMean),y=EMMean, group = reorder_within(Day_temperature, EMMean, Population), color=Day_temperature))+
+  geom_point(position=position_dodge(width=0.9), size = 3)+
+  geom_errorbar(aes(ymin = SE_inf, ymax = SE_sup), position=position_dodge(width=0.9),size = 2)+
+  geom_text(aes(label = CompMultP$.group,GPoup = reorder_within(Day_temperature, EMMean, Population), color=Day_temperature,y=SE_inf-0.05), position=position_dodge(width=0.9), size = 6) +
+  #scale_color_manual(name = "Day_temperature",values = OakPalette, breaks=TmaxSpring_tab[,c("Day_temperature")]) +
+  xlab("Population")+ylab("Germination probability")+
+  theme_bw() + theme(axis.text=element_text(size=25),axis.title = element_text(size = 30), legend.text = element_text(size=20),legend.title = element_text(size=25),legend.key.size = unit(1.5, 'cm'))
+
+ggplot(data = Predict_extractDayT, aes(x = time, y = surv, color = as.factor(Day_temperature)))+
+  geom_ribbon(aes(ymin = lower, ymax = upper, fill = as.factor(Day_temperature)), alpha = 0.2,colour = NA)+
+  scale_fill_manual(values = c("15" = "#0072B2", "20" = "#F0E442", "25" = "#D55E00"),name = "Chamber temperature")+
+  geom_line(size = 1.5)+#geom_smooth(size = 1, se=F)+
+  scale_color_manual(values = c("15" = "#0072B2", "20" = "#F0E442", "25" = "#D55E00"),name = "Chamber temperature")+
+  geom_hline(yintercept=0.5, linetype="dashed", color = "black", size = 1)+
+  theme(legend.position = "bottom")+
+  xlab("Time")+ylab("Germination probability (percentage)")+
+  theme_bw()+
+  #geom_text(aes(x = 40, y = 0.25, label= paste("p = ", pval_dayT, "\n", "Chisq"," = ", Chisq_dayT)),color = "black", check_overlap = TRUE)+
+  geom_text_repel(aes(label = Group,x = time, y = surv, color = as.factor(Day_temperature)), size = 7, fontface = "bold",
+                  data = CompMultP[,c("Population","Day_temperature",".group")] %>% 
+                    left_join(filter(Predict_extractDayT[,c("Population","Day_temperature","time","surv")],surv<0.95 & surv > 0.80)%>% 
+                                mutate(Day_temperature = as.character(Day_temperature)), by=c("Population","Day_temperature")) %>% 
+                    distinct(Population, Day_temperature, .keep_all = TRUE) %>% 
+                    mutate(Group = as.character(.group)))+
+  theme(axis.title = element_text(size = 35),axis.text = element_text(size = 30),strip.text = element_text(size = 30), legend.title=element_text(size=18),legend.text=element_text(size=15))+
+  facet_wrap2( ~ factor(Population, levels=c("TUN_Tab", "SPA_LoAl", "TUN_Fer", "POR_QudSe", "SPA_Fue", "ITA_Tus", "FRA_MoeMa", "FRA_Pad")), ncol=4, nrow = 2,strip = strip_themed(background_x = elem_list_rect(fill = OakPalette)))
+
+ggplot(data = Predict_extractDayT, aes(x = time, y = surv, color = as.factor(Day_temperature)))+
+  geom_ribbon(aes(ymin = lower, ymax = upper, fill = as.factor(Day_temperature)), alpha = 0.2,colour = NA)+
+  scale_fill_manual(values = c("15" = "#0072B2", "20" = "#F0E442", "25" = "#D55E00"),name = "Chamber temperature")+
+  geom_line(size = 1.5)+#geom_smooth(size = 1, se=F)+
+  scale_color_manual(values = c("15" = "#0072B2", "20" = "#F0E442", "25" = "#D55E00"),name = "Chamber temperature")+
+  geom_hline(yintercept=0.5, linetype="dashed", color = "black", size = 1)+
+  theme(legend.position = "bottom")+
+  xlab("Time")+ylab("Germination probability (percentage)")+
+  theme_bw()+
+  #geom_text(aes(x = 40, y = 0.25, label= paste("p = ", pval_dayT, "\n", "Chisq"," = ", Chisq_dayT)),color = "black", check_overlap = TRUE)+
+  geom_text_repel(aes(label = Group,x = time, y = surv, color = as.factor(Day_temperature)), size = 7, fontface = "bold",
+                  data = CompMultP[,c("Population","Day_temperature",".group")] %>% 
+                    left_join(filter(Predict_extractDayT[,c("Population","Day_temperature","time","surv")],surv<0.95 & surv > 0.80)%>% 
+                                mutate(Day_temperature = as.character(Day_temperature)), by=c("Population","Day_temperature")) %>% 
+                    distinct(Population, Day_temperature, .keep_all = TRUE) %>% 
+                    mutate(Group = as.character(.group)))+
+  theme(axis.title = element_text(size = 35),axis.text = element_text(size = 30),strip.text = element_text(size = 30), legend.title=element_text(size=18),legend.text=element_text(size=15))+
+  facet_wrap2( ~ factor(Population, levels=c("Fuencaliente", "Tuscania", "Fernana", "Padouen", "Tabarka", "Moliets et Maa", "Los Alcornocales", "Quinta de Serra")), ncol=4, nrow = 2,strip = strip_themed(background_x = elem_list_rect(fill = OakPalette[c("Fuencaliente", "Tuscania", "Fernana", "Padouen", "Tabarka", "Moliets et Maa", "Los Alcornocales", "Quinta de Serra")])))
+```
+
+```{r General cox model Output tables}
+CoxGanova_table = rbind(c("Germination probability","","",""),Ano %>% rownames_to_column(., "Covariate") %>% mutate_all(funs(str_replace(., "Day_temperature", "Chamber temperature"))) %>% mutate_all(funs(str_replace(., "RoundAcornMass", "Acorn Mass"))) %>% rename(p = "Pr..Chisq.") %>%  
+                          mutate_at(vars(c("Chisq")), function(x) round(as.numeric(x), 2)) %>% select(Covariate,Chisq,Df,p))
+CoxGsummary_table = rbind(c("Germination probability","","","",""),as.data.frame(summary(Coxfit)[["coefficients"]]) %>% rownames_to_column(., "Covariate") %>%  mutate_all(funs(str_replace(., "Population", ""))) %>% mutate_all(funs(str_replace(., "Day_temperature", "Chamber temperature"))) %>% mutate_all(funs(str_replace(., "RoundAcornMass", "Acorn Mass"))) %>% 
+                            mutate_at(vars(c("coef","exp(coef)","se(coef)","robust se","z")), function(x) round(as.numeric(x), 2)) %>% rename(p = "Pr(>|z|)","Test value" = "z","Std. Error" = "robust se", "Estimate" ="exp(coef)") %>% select(Covariate, Estimate, "Std. Error", "Test value", p))
+GPH_table = as.data.frame(cox.zph(Coxfit)[["table"]]) %>% rownames_to_column(., "Covariate") %>% mutate_all(funs(str_replace(., "Day_temperature", "Chamber temperature"))) %>% mutate_all(funs(str_replace(., "RoundAcornMass", "Acorn Mass"))) %>%  
+  mutate_at(vars(c("chisq")), function(x) round(as.numeric(x), 2))
+CoxGPerf_table = model_performance(Coxfit) %>% mutate(Model = "General GProba model")
+
+Times = Predict_extractTOT %>% 
+  group_by(Population, Day_temperature) %>% 
+  summarise(IniTime = as.numeric(approx(surv, time, xout=0.03)),
+            HalfTime = as.numeric(approx(surv, time, xout=0.5)),
+            EndTime = as.numeric(approx(surv, time, xout=0.97))) %>% #0.97 et pas 1 pour ne pas avoir de NA
+  filter(HalfTime != 0.5 & EndTime != 0.97 & IniTime != 0.01) %>% mutate(HalfTime = round(HalfTime,digits = 1), EndTime = round(EndTime,digits = 1),IniTime = round(IniTime,digits = 1)) %>% 
+  mutate(TotalTime = EndTime - IniTime)
+
+Times = Predict_extractDayT %>% 
+  group_by(Population, Day_temperature) %>% 
+  summarise(HalfTime = as.numeric(approx(surv, time, xout=0.5))) %>% 
+  filter(HalfTime != 0.5) %>% mutate(HalfTime = round(HalfTime,digits = 1))
+
+times_table = as.data.frame(Times[,c("Population","Day_temperature","HalfTime")] %>% filter(Day_temperature == 15) %>% 
+                              left_join(Times[,c("Population","Day_temperature","HalfTime")] %>% filter(Day_temperature == 20),by = "Population") %>% 
+                              left_join(Times[,c("Population","Day_temperature","HalfTime")] %>% filter(Day_temperature == 25),by = "Population")) %>% 
+  rowwise() %>% 
+  mutate(meanHalf = mean(c(HalfTime.x,HalfTime.y,HalfTime)),
+         sdHalf = sd(c(HalfTime.x,HalfTime.y,HalfTime)))
+
+times_table = times_table[order(times_table$meanHalf,decreasing=FALSE),] 
+```
+
+```{r Specific cox model run and total predictions}
+Coxfit = coxph(Surv(Germination_time, Germination) ~ ClimaticMoistureDeficit + Tmax_spring + Tseasonality + RM_ThermicityIndex + Day_temperature +  ClimaticMoistureDeficit:Day_temperature + Tmax_spring:Day_temperature + RM_ThermicityIndex:Day_temperature + Tseasonality:Day_temperature, data=GerminationScaled, robust = TRUE)
+test.ph = cox.zph(Coxfit)#checking proportional Hazards assumption #not assumed on the entire date, but assumed on a sample --> ok ?
+ggcoxzph(test.ph)#checking proportional Hazards assumption graphic
+plot(test.ph)
+ggcoxdiagnostics(CoxfitT15, type = "dfbeta",# checking influential observations
+                 linear.predictions = FALSE, ggtheme = theme_bw())
+ggcoxfunctional(Surv(Germination_time, Germination) ~ Population, data=filter(Germination, Day_temperature == 15))#checking linearity
+summary(Coxfit)
+Ano = data.frame(car::Anova(Coxfit))
+#rownames(Ano) <- NULL
+Covar_val = unique(Germination[,c("ClimaticMoistureDeficit","Tmax_spring","Tseasonality","RM_ThermicityIndex","Day_temperature")])
+Survivalfit = survfit(Coxfit, newdata = Covar_val)
+
+#Predictions per population, chamber and mother/RoundAcornMass
+Predict_extractTOT = survfit2df(Survivalfit) %>% 
+  left_join(cbind(Covar_val,row.names(Covar_val)) %>% rename("strata"="...6"),by = "strata") %>% 
+  mutate(PH = cox.zph(Coxfit)[["table"]][5,3],
+         surv = 1 - surv,
+         lower = 1 - lower,
+         upper = 1 - upper,
+         Chisq_CMD = c(round(Ano[1,2],2)),
+         Chisq_Tspring = c(round(Ano[2,2],2)),
+         Chisq_Tseason = c(round(Ano[3,2],2)),
+         Chisq_ThermI = c(round(Ano[4,2],2)),
+         Chisq_CMD = Ano[1,3],
+         Chisq_Tspring = Ano[2,3],
+         Chisq_Tseason = Ano[3,3],
+         Chisq_ThermI = Ano[4,3])
+```
+
+```{r Specific cox model Output tables}
+CoxSanova_table = rbind(c("Germination probability","","",""),Ano %>% rownames_to_column(., "Covariate") %>% mutate_all(funs(str_replace(., "Day_temperature", "Chamber temperature"))) %>% mutate_all(funs(str_replace(., "RoundAcornMass", "Acorn Mass"))) %>% rename(p = "Pr..Chisq.") %>%  
+                          mutate_at(vars(c("Chisq")), function(x) round(as.numeric(x), 2)) %>% select(Covariate,Chisq,Df,p))
+CoxSsummary_table = rbind(c("Germination probability","","","",""),as.data.frame(summary(Coxfit)[["coefficients"]]) %>% rownames_to_column(., "Covariate") %>%  mutate_all(funs(str_replace(., "Population", ""))) %>% mutate_all(funs(str_replace(., "Day_temperature", "Chamber temperature"))) %>% mutate_all(funs(str_replace(., "RoundAcornMass", "Acorn Mass"))) %>% 
+                            mutate_at(vars(c("coef","exp(coef)","se(coef)","robust se","z")), function(x) round(as.numeric(x), 2)) %>% rename(p = "Pr(>|z|)","Test value" = "z","Std. Error" = "robust se", "Estimate" ="exp(coef)") %>% select(Covariate, Estimate, "Std. Error", "Test value", p))
+SPH_table = as.data.frame(cox.zph(Coxfit)[["table"]]) %>% rownames_to_column(., "Covariate") %>% mutate_all(funs(str_replace(., "Day_temperature", "Chamber temperature"))) %>% mutate_all(funs(str_replace(., "RoundAcornMass", "Acorn Mass"))) %>%  
+  mutate_at(vars(c("chisq")), function(x) round(as.numeric(x), 2))
+CoxSPerf_table = model_performance(Coxfit) %>% mutate(Model = "Specific GProba model")
+
+Times = Predict_extractTOT %>% 
+  group_by(Population, Day_temperature) %>% 
+  summarise(IniTime = as.numeric(approx(surv, time, xout=0.03)),
+            HalfTime = as.numeric(approx(surv, time, xout=0.5)),
+            EndTime = as.numeric(approx(surv, time, xout=0.97))) %>% #0.97 et pas 1 pour ne pas avoir de NA
+  filter(HalfTime != 0.5 & EndTime != 0.97 & IniTime != 0.01) %>% mutate(HalfTime = round(HalfTime,digits = 1), EndTime = round(EndTime,digits = 1),IniTime = round(IniTime,digits = 1)) %>% 
+  mutate(TotalTime = EndTime - IniTime)
+times_table = as.data.frame(Times[,c("Population","Day_temperature","HalfTime","TotalTime")] %>% filter(Day_temperature == 15) %>% 
+                              left_join(Times[,c("Population","Day_temperature","HalfTime","TotalTime")] %>% filter(Day_temperature == 20),by = "Population") %>% 
+                              left_join(Times[,c("Population","Day_temperature","HalfTime","TotalTime")] %>% filter(Day_temperature == 25),by = "Population"))
+
+times_table = times_table[order(times_table$HalfTime.y,decreasing=FALSE),]
+```
+
+##G(0,1) / GP
+
+Response variable: Germination -> binomial data
+-> Generalized logistic mixed-effects models (glmer)
+
+```{r  G(0,1) general model}
+#Model1 = glm(Germination ~  Day_temperature + Population + Day_temperature:Population + proxi_poids + proxi_poids:Population, family = binomial(link = "logit"), data = GerminationScaled)
+#Model2 = glmer(Germination ~  Day_temperature + Population + Day_temperature:Population + proxi_poids + proxi_poids:Population + (1 | Id_mother), family = binomial(link = "logit"), data = GerminationScaled, control=glmerControl(optimizer="bobyqa", optCtrl=list(maxfun=2e5)))
+#AIC(Model1,Model2)#AIC lower with random effect
+
+Model = glmer(Germination ~  Day_temperature + Population + Day_temperature:Population + proxi_poids + proxi_poids:Population + (1 | Id_mother), family = binomial(link = "logit"), data = GerminationScaled, control=glmerControl(optimizer="bobyqa", optCtrl=list(maxfun=2e5)))
+
+model_performance(Model) ; r.squaredGLMM(Model)#Variance expliqué (variance marginale des effets fixes et variance conditionnelle fixe + random)
+Anova(Model)
+summary(Model)
+
+#Cross validation
+Germination_training = GerminationScaled[sample(nrow(GerminationScaled), 400), ]#training data set
+Germination_validate = filter(GerminationScaled, Id_seed %notin% Germination_training$Id_seed) %>% group_by(Population, Day_temperature) %>% mutate(Germination_rate = sum(Germination)/n())
+ModelCV = glmer(Germination ~  Day_temperature + Population + Day_temperature:Population + proxi_poids + proxi_poids:Population + (1 | Id_mother), family = binomial(link = "logit"), data = Germination_training, control=glmerControl(optimizer="bobyqa", optCtrl=list(maxfun=2e5)))#training of the Model on the training dataset
+Predictions = predict(ModelCV, Germination_validate, re.form=NA, type="response")
+cor.test(Predictions, Germination_validate$Germination_rate)
+scatter_plot(obs = Germination_validate$Germination_rate, pred = Predictions) + coord_cartesian(xlim = c(0, 1), ylim = c(0, 1))#print obs VS pred on a graphe 1:1
+
+#Output tables
+GGanova_table = rbind(c("G(0,1)","","",""),as.data.frame(Anova(Model)) %>% rownames_to_column(., "Covariate") %>% mutate_all(funs(str_replace(., "Day_temperature", "Chamber temperature"))) %>% mutate_all(funs(str_replace(., "proxi_poids", "Acorn Mass"))) %>% rename(p = "Pr(>Chisq)") %>% 
+                        mutate_at(vars(c("Chisq")), function(x) round(as.numeric(x), 2)))
+GGsummary_table = rbind(c("G(0,1)","","","",""),as.data.frame(summary(Model)[["coefficients"]]) %>% rownames_to_column(., "Covariate") %>%  mutate_all(funs(str_replace(., "Population", ""))) %>% mutate_all(funs(str_replace(., "Day_temperature", "Chamber temperature"))) %>% mutate_all(funs(str_replace(., "proxi_poids", "Acorn Mass"))) %>% rename(p = "Pr(>|z|)") %>% 
+                          mutate_at(vars(c("Estimate","Std. Error","z value")), function(x) round(as.numeric(x), 2)) %>% rename("Test value" = "z value"))
+GGPerf_table = model_performance(Model) %>% mutate(PearsonsCorrelation_obsVSpred = cor.test(Predictions, Germination_validate$Germination_rate)[["estimate"]][["cor"]],Model = "General GP model")
+```
+
+```{r  G(0,1) specific Population model}
+Model = glmer(Germination ~  ClimaticMoistureDeficit + Tmax_spring + Tseasonality + RM_ThermicityIndex  + (1 | Id_mother), family = binomial(link = "logit"), data = GerminationScaled)
+#Stepwise selection:doesn't change the result
+
+model_performance(Model) ; r.squaredGLMM(Model)#Variance expliqué (variance marginale des effets fixes et variance conditionnelle fixe + random)
+Anova(Model)
+summary(Model)
+
+#Cross validation
+Germination_training = GerminationScaled[sample(nrow(GerminationScaled), 400), ]#training data set
+Germination_validate = filter(GerminationScaled, Id_seed %notin% Germination_training$Id_seed) %>% group_by(Population, Day_temperature) %>% mutate(Germination_rate = sum(Germination)/n())
+ModelCV = glm(Germination ~  ClimaticMoistureDeficit + Tmax_spring + Tseasonality + RM_ThermicityIndex, family = binomial(link = "logit"), data = Germination_training)#training of the Model on the training dataset
+Predictions = predict(ModelCV, Germination_validate, re.form=NA, type="response")
+cor.test(Predictions, Germination_validate$Germination_rate)
+scatter_plot(obs = Germination_validate$Germination_rate, pred = Predictions) + coord_cartesian(xlim = c(0, 1), ylim = c(0, 1))#print obs VS pred on a graphe 1:1
+
+#Output tables
+GSanova_table = rbind(c("G(0,1)","","",""),as.data.frame(Anova(Model)) %>% rownames_to_column(., "Covariate") %>% mutate_all(funs(str_replace(., "Day_temperature", "Chamber temperature"))) %>% mutate_all(funs(str_replace(., "proxi_poids", "Acorn Mass"))) %>% rename(p = "Pr(>Chisq)") %>%  
+                        mutate_at(vars(c("Chisq")), function(x) round(as.numeric(x), 2)))
+GSsummary_table = rbind(c("G(0,1)","","","",""),as.data.frame(summary(Model)[["coefficients"]]) %>% rownames_to_column(., "Covariate") %>%  mutate_all(funs(str_replace(., "Population", ""))) %>% mutate_all(funs(str_replace(., "Day_temperature", "Chamber temperature"))) %>% mutate_all(funs(str_replace(., "proxi_poids", "Acorn Mass"))) %>% rename(p = "Pr(>|z|)") %>% 
+                          mutate_at(vars(c("Estimate","Std. Error","z value")), function(x) round(as.numeric(x), 2)) %>% rename("Test value" = "z value"))
+GSPerf_table = model_performance(Model) %>% mutate(PearsonsCorrelation_obsVSpred = cor.test(Predictions, Germination_validate$Germination_rate)[["estimate"]][["cor"]],Model = "Specific GP model")
+```
+
+Index
+```{r  GP general model}
+ggplot(data = GerminationTraits)+geom_histogram(aes(GR))#quantitative continuous between 0 an 1 (proportion): beta regression
+ggplot(data = GerminationTraits)+geom_histogram(aes(p.beta(GerminationTraits$GP)))#put it in ]0; 1[ instead of [0; 1] 
+
+Model = betareg(p.beta(GerminationTraitsScaled$GP) ~ Day_temperature + Population + Day_temperature:Population + AM + AM:Population, data = GerminationTraitsScaled)
+#Model = glmmTMB(p.beta(GR) ~ Day_temperature + Population + Day_temperature:Population + AM + AM:Population, data = GerminationTraitsScaled, family = beta_family(link="logit"))#can use this to check assumptions with DHARMa. The 2 models gives similar output.
+
+#model_performance(Model) ; r.squaredGLMM(Model) #rsq(Model)
+Anova(Model)
+summary(Model)
+
+Model = betareg(p.beta(GerminationTraitsScaled$GP) ~ Population, data = GerminationTraitsScaled)#clean other effects to keep only population for pairwise comparisons
+PairComp_GP = back.emmeans(emmeans(Model, ~ Population, mode="link"),transform="p.beta",n=120) ; colnames(PairComp_GP) = c("Population","SE_inf","EMMean","SE_sup")
+PairComp_GP = PairComp_GP %>% arrange(EMMean) %>% left_join(cld(emmeans(Model, ~ Population, mode="link"), adjust = "tukey", Letters = LETTERS)[,c("Population",".group")], by = c("Population")) %>% mutate(Population = factor(Population, levels = unique(Population))) %>% left_join(ClimateProv[,c("Population","ClimaticMoistureDeficit","RM_ThermicityIndex","Tseasonality")],by="Population")
+
+#Cross validation
+Germination_training = GerminationTraitsScaled[sample(nrow(GerminationTraitsScaled), 80), ]#training data set
+Germination_validate = filter(GerminationTraitsScaled, Id %notin% Germination_training$Id)
+ModelCV = betareg(p.beta(Germination_training$GP) ~ Day_temperature + Population + Day_temperature:Population + AM + AM:Population, data = Germination_training)#training of the Model on the training dataset
+Predictions = predict(ModelCV, Germination_validate, re.form=NA, type="response")
+cor.test(Predictions, Germination_validate$GP)
+scatter_plot(obs = Germination_validate$GP, pred = Predictions) + coord_cartesian(xlim = c(0, 1), ylim = c(0, 1))#print obs VS pred on a graphe 1:1
+
+#Output tables
+GRGanova_table = rbind(c("GP","","",""),as.data.frame(Anova(Model)) %>% rownames_to_column(., "Covariate") %>% mutate_all(funs(str_replace(., "Day_temperature", "Chamber temperature"))) %>% mutate_all(funs(str_replace(., "proxi_poids", "Acorn Mass"))) %>% rename(p = "Pr(>Chisq)") %>%  
+                         mutate_at(vars(c("Chisq")), function(x) round(as.numeric(x), 2)))
+GRGsummary_table = rbind(c("GP","","","",""),as.data.frame(summary(Model)[["coefficients"]])[,c(1:4)] %>% rownames_to_column(., "Covariate") %>%  mutate_all(funs(str_replace(., "Population", ""))) %>% mutate_all(funs(str_replace(., "Day_temperature", "Chamber temperature"))) %>% mutate_all(funs(str_replace(., "proxi_poids", "Acorn Mass"))) %>% rename(p = "mean.Pr...z..") %>% 
+                           mutate_at(vars(c("mean.Estimate","mean.Std..Error","mean.z.value")), function(x) round(as.numeric(x), 2)) %>% rename("Test value" = "mean.z.value","Estimate" = "mean.Estimate","Std. Error" = "mean.Std..Error"))
+GRGPerf_table = model_performance(Model) %>% mutate(PearsonsCorrelation_obsVSpred = cor.test(Predictions, Germination_validate$GP)[["estimate"]][["cor"]])
+```
+
+```{r  GP specific Population model}
+GerminationTraitsScaledGrouped = GerminationTraitsScaled %>% group_by(Population) %>% summarise_all(mean)#no significant problem detected on grouped model
+
+#Model = glmmTMB(p.beta(GerminationTraitsScaled$GP) ~ ClimaticMoistureDeficit + Tmax_spring + Tseasonality + RM_ThermicityIndex, data = GerminationTraitsScaled, family = beta_family(link="logit"))#can also use betareg
+#Model = betareg(p.beta(GerminationTraitsScaled$GP) ~ ClimaticMoistureDeficit + Tmax_spring + Tseasonality + RM_ThermicityIndex, data = GerminationTraitsScaled)
+
+#Stepwise selection
+#Model = glmmTMB(p.beta(GR) ~  Tseasonality + RM_ThermicityIndex, data = GerminationTraitsScaled, family = beta_family(link="logit"))
+Model = betareg(p.beta(GR) ~  Tseasonality + RM_ThermicityIndex, data = GerminationTraitsScaled)
+
+#model_performance(Model) ; r.squaredGLMM(Model) #rsq(Model)
+Anova(Model)
+summary(Model)
+
+#Cross validation
+Germination_training = GerminationTraitsScaled[sample(nrow(GerminationTraitsScaled), 80), ]#training data set
+Germination_validate = filter(GerminationTraitsScaled, Id %notin% Germination_training$Id)
+ModelCV = betareg(p.beta(GR) ~  Tseasonality + RM_ThermicityIndex, data = Germination_training)#training of the Model on the training dataset
+Predictions = predict(ModelCV, Germination_validate, re.form=NA, type="response")
+cor.test(Predictions, Germination_validate$GP)
+scatter_plot(obs = Germination_validate$GP, pred = Predictions) + coord_cartesian(xlim = c(0, 1), ylim = c(0, 1))#print obs VS pred on a graphe 1:1
+
+#Output tables
+GRSanova_table = rbind(c("GP","","",""),as.data.frame(Anova(Model)) %>% rownames_to_column(., "Covariate") %>% mutate_all(funs(str_replace(., "Day_temperature", "Chamber temperature"))) %>% mutate_all(funs(str_replace(., "proxi_poids", "Acorn Mass"))) %>% rename(p = "Pr(>Chisq)") %>%  
+                         mutate_at(vars(c("Chisq")), function(x) round(as.numeric(x), 2)))
+GRSsummary_table = rbind(c("GP","","","",""),as.data.frame(summary(Model)[["coefficients"]]$mean) %>% rownames_to_column(., "Covariate") %>%  mutate_all(funs(str_replace(., "Population", ""))) %>% mutate_all(funs(str_replace(., "Day_temperature", "Chamber temperature"))) %>% mutate_all(funs(str_replace(., "proxi_poids", "Acorn Mass"))) %>% rename(p = "Pr(>|z|)") %>% 
+                           mutate_at(vars(c("Estimate","Std. Error","z value")), function(x) round(as.numeric(x), 2)) %>% rename("Test value" = "z value"))
+GRSPerf_table = model_performance(Model) %>% mutate(PearsonsCorrelation_obsVSpred = cor.test(Predictions, Germination_validate$GP)[["estimate"]][["cor"]])
+```
+
+##GT / MGT
+
+```{r  Raw data}
+ggplot(data = GermIndexes)+
+  geom_point(aes(x=Day_temperature,y=MGT))+
+  geom_smooth(aes(x=Day_temperature,y=MGT, color = Population))+
+  scale_color_manual(values = OakPalette,breaks=TmaxSpring_tab[,c("Population")])+
+  theme_bw()
+
+ggplot(data = Germination)+
+  geom_point(aes(x=Day_temperature,y=Germination_time))+
+  geom_smooth(aes(x=Day_temperature,y=Germination_time, color = Population))+
+  scale_color_manual(values = OakPalette,breaks=TmaxSpring_tab[,c("Population")])+
+  theme_bw()
+
+ggplot(data = Germination)+
+  geom_point(aes(x=Tmax_spring,y=Germination_time))+
+  geom_smooth(aes(x=Tmax_spring,y=Germination_time),method = "glm")+
+  theme_bw()
+```
+
+```{r  Data transformation_remove ungerminated acorns}
+GerminationScaledT = filter(GerminationScaled, Germination != 0) %>% #Remove ungerminated accorns
+  mutate(Germination_time = ifelse(Germination_time == 0, 1,Germination_time))#germination à 0 n'existe pas ? Correction germination à 1 jour
+GerminationTraitsScaledT = filter(GerminationTraitsScaled, !is.na(MGT))
+
+GerminationT = filter(Germination, Germination != 0) %>% #Remove ungerminated accorns
+  mutate(Germination_time = ifelse(Germination_time == 0, 1,Germination_time))#germination à 0 n'existe pas ? Correction germination à 1 jour
+GerminationTraitsT = filter(GerminationTraits, !is.na(MGT))
+```
+
+Response variable: Germination time -> zero inflated count data
+-> Poisson regression (glmer) ? No, because overdispersion of data
+-> Negative Binomial regression (glmer.nb) ? Yes, but still no so good
+-> Zero inflated Negative Binomial regression (glmmTMB) ? Better
+
+```{r  GT general model}
+Model = glmmTMB(Germination_time ~ Day_temperature + Population + Day_temperature:Population + proxi_poids + proxi_poids:Population + (1 | Id_mother), data=GerminationT, ziformula = ~1, family = nbinom1(link = "log"))
+AIC(Model)#AIC lower with random effect
+model_performance(Model) ; r.squaredGLMM(Model)#Variance expliqué (variance marginale des effets fixes et variance conditionnelle fixe + random)
+Anova(Model)
+summary(Model)
+
+
+Model = glmmTMB(Germination_time ~ Day_temperature + Population + Day_temperature:Population + proxi_poids + proxi_poids:Population + (1 | Id_mother), data=filter(GerminationT,Population != "Fernana" & Population != "Moliets et Maa"), ziformula = ~1, family = nbinom1(link = "log"))
+effect_plot(Model,pred = "Day_temperature",plot = TRUE,interval = TRUE,int.type = "confidence",int.width = .8)+xlab("Chamber temperature") + ylab("Germination time")+ ylim(0,50)+theme(axis.text=element_text(size=20),axis.title=element_text(size=25),legend.title=element_text(size=20),legend.text=element_text(size=15))
+
+InteractionPlot = interact_plot(Model, pred = "Day_temperature", modx = "Population", plot = TRUE, colors = OakPalette, breaks=RM_ThermicityIndex_tab[,c("Population")],interval = TRUE, int.type = "confidence", int.width = .8) + scale_linetype_manual(values = rep("solid", length(unique(GerminationT$Population))))+xlab("Chamber temperature") + ylab("Germination time")
+InteractionPlot + ylim(0,50)+theme(axis.text=element_text(size=20),axis.title=element_text(size=25),legend.title=element_text(size=20),legend.text=element_text(size=15))
+
+interact_plot(Model, pred = "proxi_poids", modx = "Population", plot = TRUE, colors = OakPalette,interval = TRUE, int.type = "confidence", int.width = .8) + scale_linetype_manual(values = rep("solid", length(unique(GerminationT$Population))))+ scale_color_manual(name = "Population",values = OakPalette, breaks=RM_ThermicityIndex_tab[,c("Population")])+xlab("Acorn mass") + ylab("Germination time")
+
+GerminationT[,c("Day_temperature","Germination_time")] %>% group_by(Day_temperature) %>% summarise_all(mean)
+
+#Cross validation
+Germination_training = GerminationT[sample(nrow(GerminationT), 400), ]#training data set
+Germination_validate = filter(GerminationT, Id_seed %notin% Germination_training$Id_seed) %>% group_by(Population, Day_temperature) %>% mutate(Germination_rate = sum(Germination)/n())
+ModelCV = glmmTMB(Germination_time ~ Day_temperature + Population + Day_temperature:Population + proxi_poids + (1 | Id_mother), data=Germination_training, ziformula = ~1, family = nbinom1(link = "log"))#training of the Model on the training dataset
+Predictions = predict(ModelCV, Germination_validate, re.form=NA, type="response")
+cor.test(Predictions, Germination_validate$Germination_time)
+scatter_plot(obs = Germination_validate$Germination_time, pred = Predictions) + coord_cartesian(xlim = c(0, 1), ylim = c(0, 1))#print obs VS pred on a graphe 1:1
+
+#Output tables
+GTGanova_table = rbind(c("GT","","",""),as.data.frame(Anova(Model)) %>% rownames_to_column(., "Covariate") %>% mutate_all(funs(str_replace(., "Day_temperature", "Chamber temperature"))) %>% mutate_all(funs(str_replace(., "proxi_poids", "Acorn Mass"))) %>% rename(p = "Pr(>Chisq)") %>%  
+                         mutate_at(vars(c("Chisq")), function(x) round(as.numeric(x), 2)))
+GTGsummary_table = rbind(c("GT","","","",""),as.data.frame(summary(Model)[["coefficients"]]$cond) %>% rownames_to_column(., "Covariate") %>%  mutate_all(funs(str_replace(., "Population", ""))) %>% mutate_all(funs(str_replace(., "Day_temperature", "Chamber temperature"))) %>% mutate_all(funs(str_replace(., "proxi_poids", "Acorn Mass"))) %>% rename(p = "Pr(>|z|)") %>% 
+                           mutate_at(vars(c("Estimate","Std. Error","z value")), function(x) round(as.numeric(x), 2)) %>% rename("Test value" = "z value"))
+GTGPerf_table = model_performance(Model) %>% mutate(PearsonsCorrelation_obsVSpred = cor.test(Predictions, Germination_validate$Germination_time)[["estimate"]][["cor"]],Model = "General GT model")
+```
+
+```{r  GT specific Population model}
+#Model = glmmTMB(Germination_time ~ ClimaticMoistureDeficit + Tmax_spring + Tseasonality + RM_ThermicityIndex + Day_temperature + ClimaticMoistureDeficit:Day_temperature + Tmax_spring:Day_temperature + RM_ThermicityIndex:Day_temperature + I(Tseasonality^2):Day_temperature, data=GerminationT, ziformula = ~1, family = nbinom1(link = "log"))
+#Stepwise selection
+Model = glmmTMB(Germination_time ~ ClimaticMoistureDeficit + Day_temperature + RM_ThermicityIndex + Tmax_spring + Tseasonality + Day_temperature:Tseasonality + (1 | Id_mother), data=GerminationT, ziformula = ~1, family = nbinom1(link = "log"))
+
+
+model_performance(Model) ; r.squaredGLMM(Model)#Variance expliqué (variance marginale des effets fixes et variance conditionnelle fixe + random)
+Anova(Model)
+summary(Model)
+
+InteractionPlot = interact_plot(Model, pred = "ClimaticMoistureDeficit", modx = "RM_ThermicityIndex", plot = TRUE, interval = TRUE, int.type = "confidence", int.width = .8) + scale_linetype_manual(values = rep("solid", length(unique(GerminationT$Population))))+ ylab("Germination time")
+InteractionPlot + ylim(0,50)+theme(axis.text=element_text(size=20),axis.title=element_text(size=25),legend.title=element_text(size=20),legend.text=element_text(size=15))
+
+#Cross validation
+Germination_training = GerminationT[sample(nrow(GerminationT), 400), ]#training data set
+Germination_validate = filter(GerminationT, Id_seed %notin% Germination_training$Id_seed) %>% group_by(Population, Day_temperature) %>% mutate(Germination_rate = sum(Germination)/n())
+ModelCV = glmmTMB(Germination_time ~ ClimaticMoistureDeficit + Day_temperature + RM_ThermicityIndex + Tmax_spring + Tseasonality + Day_temperature:Tseasonality, data=Germination_training, ziformula = ~1, family = nbinom1(link = "log"))#training of the Model on the training dataset
+Predictions = predict(ModelCV, Germination_validate, re.form=NA, type="response")
+cor.test(Predictions, Germination_validate$Germination_time)
+scatter_plot(obs = Germination_validate$Germination_time, pred = Predictions)#print obs VS pred on a graphe 1:1
+
+#Output tables
+GTSanova_table = rbind(c("GT","","",""),as.data.frame(Anova(Model)) %>% rownames_to_column(., "Covariate") %>% mutate_all(funs(str_replace(., "Day_temperature", "Chamber temperature"))) %>% mutate_all(funs(str_replace(., "proxi_poids", "Acorn Mass"))) %>% rename(p = "Pr(>Chisq)") %>%  
+                         mutate_at(vars(c("Chisq")), function(x) round(as.numeric(x), 2)))
+GTSsummary_table = rbind(c("GT","","","",""),as.data.frame(summary(Model)[["coefficients"]]$cond) %>% rownames_to_column(., "Covariate") %>%  mutate_all(funs(str_replace(., "Population", ""))) %>% mutate_all(funs(str_replace(., "Day_temperature", "Chamber temperature"))) %>% mutate_all(funs(str_replace(., "proxi_poids", "Acorn Mass"))) %>% rename(p = "Pr(>|z|)") %>% 
+                           mutate_at(vars(c("Estimate","Std. Error","z value")), function(x) round(as.numeric(x), 2)) %>% rename("Test value" = "z value"))
+GTSPerf_table = model_performance(Model) %>% mutate(PearsonsCorrelation_obsVSpred = cor.test(Predictions, Germination_validate$Germination_time)[["estimate"]][["cor"]],Model = "Specific GT model")
+```
+
+```{r  MGT general model}
+#Model = glm(MGT ~ Day_temperature + Population + Day_temperature:Population + AM + AM:Population, data = GerminationTraitsScaled, family = poisson(link="identity"))
+#Model$deviance / Model$df.residual #>1.5 --> overdispersion --> quasipoisson or negative binomial
+
+Model = glm.nb(MGT ~ Day_temperature + Population + Day_temperature:Population + AM + AM:Population, data = GerminationTraitsScaledT, link = "identity")
+Model$deviance / Model$df.residual #ok
+
+model_performance(Model) ; rsq(Model)
+Anova(Model)
+summary(Model)
+
+Model = glm.nb(MGT ~ Day_temperature + Population + Day_temperature:Population, data = GerminationTraitsScaledT, link = "identity")#keep only significant effects for pairwise comparisons
+PairComp_MGT = as.data.frame(emmeans(Model, ~ Population, mode="link")) %>% mutate(SE_inf = emmean - SE,SE_sup = emmean + SE) %>% select(Population,SE_inf,emmean,SE_sup) ; colnames(PairComp_MGT) = c("Population","SE_inf","EMMean","SE_sup")
+PairComp_MGT = PairComp_MGT %>% arrange(EMMean) %>% left_join(cld(emmeans(Model, ~ Population, mode="link"), adjust = "tukey", Letters = LETTERS)[,c("Population",".group")], by = c("Population")) %>% mutate(Population = factor(Population, levels = unique(Population)))%>% left_join(ClimateProv[,c("Population","ClimaticMoistureDeficit","RM_ThermicityIndex","Tseasonality")],by="Population")
+
+Model = glm.nb(MGT ~ as.factor(Day_temperature):Population, data = GerminationTraitsScaledT, link = "identity")#keep only significant effects for pairwise comparisons
+PairComp2_MGT = as.data.frame(emmeans(Model, ~ Day_temperature | Population, mode="link")) %>% mutate(SE_inf = emmean - SE,SE_sup = emmean + SE,Day_temperature = as.character(ifelse(Day_temperature < 0,"15",ifelse(Day_temperature > 0, "25","20")))) %>% select(Population,Day_temperature,SE_inf,emmean,SE_sup) ; colnames(PairComp2_MGT) = c("Population","Day_temperature","SE_inf","EMMean","SE_sup")  
+PairComp2_MGT = PairComp2_MGT %>% arrange(EMMean) %>% left_join(cld(emmeans(Model, ~ Day_temperature | Population, mode="link"), adjust = "tukey", Letters = LETTERS)[,c("Population","Day_temperature",".group")] %>% mutate(Day_temperature = as.character(ifelse(Day_temperature < 0,"15",ifelse(Day_temperature > 0, "25","20")))), by = c("Population","Day_temperature")) %>% group_by(Population) %>% mutate(Day_temperature = factor(Day_temperature, levels = unique(Day_temperature))) %>% left_join(ClimateProv[,c("Population","ClimaticMoistureDeficit","RM_ThermicityIndex","Tseasonality")],by="Population")
+
+Model = glm.nb(MGT ~ Day_temperature + Population + Day_temperature:Population + AM + AM:Population, data = GerminationTraitsT, link = "identity")
+interact_plot(Model, pred = "Day_temperature", modx = "Population", plot = TRUE, colors = OakPalette,interval = TRUE, int.type = "confidence", int.width = .8) + scale_linetype_manual(values = rep("solid", length(unique(GerminationT$Population))))+ scale_color_manual(name = "Population",values = OakPalette, breaks=RM_ThermicityIndex_tab[,c("Population")])+xlab("Chamber temperature") + ylab("Mean germination time")+theme_bw()+ theme(axis.text=element_text(size=30),axis.title=element_text(size=35),
+                                                                                                                                                                                                                                                                                                                                                                                                                                                   legend.title = element_text(size = 23),legend.text = element_text(size = 20)) + guides(color = guide_legend(override.aes = list(size = 10)))
+
+Model = glm.nb(MGT ~ as.factor(Day_temperature) + Population + as.factor(Day_temperature):Population + AM + AM:Population, data = GerminationTraitsT %>% mutate(Day_temperature=as.factor(Day_temperature)), link = "identity")
+interact_plot(Model, pred = "AM", modx = "Day_temperature", plot = TRUE, colors = c("15" = "#3399FF", "20" = "#009900", "25" = "#CC3333"),interval = TRUE, int.type = "confidence", int.width = .8) + scale_linetype_manual(values = rep("solid", length(unique(GerminationT$Population))))+theme_bw()+theme(axis.text=element_text(size=30),axis.title=element_text(size=35),
+                                                                                                                                                                                                                                                                                                             legend.title = element_text(size = 23),legend.text = element_text(size = 20)) + guides(color = guide_legend(override.aes = list(size = 10)))
+
+#Cross validation
+Germination_training = GerminationTraitsScaledT[sample(nrow(GerminationTraitsScaledT), 80), ]#training data set
+Germination_validate = filter(GerminationTraitsScaledT, Id %notin% Germination_training$Id)
+ModelCV = glm.nb(MGT ~ Day_temperature + Population + Day_temperature:Population + AM + AM:Population, data = Germination_training, link = "identity")#training of the Model on the training dataset
+Predictions = predict(ModelCV, Germination_validate, re.form=NA, type="response")
+cor.test(Predictions, Germination_validate$MGT)
+scatter_plot(obs = Germination_validate$MGT, pred = Predictions)#print obs VS pred on a graphe 1:1
+
+#Output tables
+MGTGanova_table = rbind(c("MGT","","",""),as.data.frame(Anova(Model)) %>% rownames_to_column(., "Covariate") %>% mutate_all(funs(str_replace(., "Day_temperature", "Chamber temperature"))) %>% mutate_all(funs(str_replace(., "proxi_poids", "Acorn Mass"))) %>% rename(p = "Pr(>Chisq)") %>%  
+                          mutate_at(vars(c("LR Chisq")), function(x) round(as.numeric(x), 2))) %>% rename(Chisq = "LR Chisq")
+MGTGsummary_table = rbind(c("MGT","","","",""),as.data.frame(summary(Model)[["coefficients"]]) %>% rownames_to_column(., "Covariate") %>%  mutate_all(funs(str_replace(., "Population", ""))) %>% mutate_all(funs(str_replace(., "Day_temperature", "Chamber temperature"))) %>% mutate_all(funs(str_replace(., "proxi_poids", "Acorn Mass"))) %>% rename(p = "Pr(>|z|)") %>% 
+                            mutate_at(vars(c("Estimate","Std. Error","z value")), function(x) round(as.numeric(x), 2)) %>% rename("Test value" = "z value"))
+MGTGPerf_table = model_performance(Model) %>% mutate(PearsonsCorrelation_obsVSpred = cor.test(Predictions, Germination_validate$MGT)[["estimate"]][["cor"]])
+```
+
+```{r  MGT specific Population model}
+Model = glm.nb(MGT ~ ClimaticMoistureDeficit + Tmax_spring + Tseasonality + RM_ThermicityIndex + Day_temperature +  ClimaticMoistureDeficit:Day_temperature + Tmax_spring:Day_temperature + RM_ThermicityIndex:Day_temperature + Tseasonality:Day_temperature, data = GerminationTraitsScaledT, link = "identity")
+Model$deviance / Model$df.residual #ok
+#Stepwise selection: remove interaction, doesn't change the result
+
+model_performance(Model) ; rsq(Model)
+Anova(Model)
+summary(Model)
+
+#Cross validation
+Germination_training = GerminationTraitsScaledT[sample(nrow(GerminationTraitsScaledT), 80), ]#training data set
+Germination_validate = filter(GerminationTraitsScaledT, Id %notin% Germination_training$Id)
+ModelCV = glm.nb(MGT ~ ClimaticMoistureDeficit + Tmax_spring + Tseasonality + RM_ThermicityIndex + Day_temperature + ClimaticMoistureDeficit:Day_temperature + Tmax_spring:Day_temperature + RM_ThermicityIndex:Day_temperature + Tseasonality:Day_temperature, data = Germination_training, link = "identity")#training of the Model on the training dataset
+Predictions = predict(ModelCV, Germination_validate, re.form=NA, type="response")
+cor.test(Predictions, Germination_validate$MGT)
+scatter_plot(obs = Germination_validate$MGT, pred = Predictions,na.rm = T)#print obs VS pred on a graphe 1:1
+
+#Output tables
+MGTSanova_table = rbind(c("MGT","","",""),as.data.frame(Anova(Model)) %>% rownames_to_column(., "Covariate") %>% mutate_all(funs(str_replace(., "Day_temperature", "Chamber temperature"))) %>% mutate_all(funs(str_replace(., "proxi_poids", "Acorn Mass"))) %>% rename(p = "Pr(>Chisq)") %>%  
+                          mutate_at(vars(c("LR Chisq")), function(x) round(as.numeric(x), 2))) %>% rename(Chisq = "LR Chisq")
+MGTSsummary_table = rbind(c("MGT","","","",""),as.data.frame(summary(Model)[["coefficients"]]) %>% rownames_to_column(., "Covariate") %>%  mutate_all(funs(str_replace(., "Population", ""))) %>% mutate_all(funs(str_replace(., "Day_temperature", "Chamber temperature"))) %>% mutate_all(funs(str_replace(., "proxi_poids", "Acorn Mass"))) %>% rename(p = "Pr(>|z|)") %>% 
+                            mutate_at(vars(c("Estimate","Std. Error","z value")), function(x) round(as.numeric(x), 2)) %>% rename("Test value" = "z value"))
+MGTSPerf_table = model_performance(Model) %>% mutate(PearsonsCorrelation_obsVSpred = cor.test(Predictions, Germination_validate$MGT)[["estimate"]][["cor"]])
+```
+
+##GS
+
+```{r  GS general model}
+#GS close to 1 = very synchronized
+ggplot(data = GerminationTraits)+geom_histogram(aes(GS))#quantitative continuous between 0 an 1 (proportion): beta regression
+ggplot(data = GerminationTraits)+geom_histogram(aes(p.beta(GerminationTraits$GS)))#put it in ]0; 1[ instead of [0; 1] 
+
+Model = betareg(p.beta(GerminationTraitsScaledT$GS) ~ Day_temperature + Population + Day_temperature:Population + AM + AM:Population, data = GerminationTraitsScaledT)
+#Model = glmmTMB(p.beta(GerminationTraitsScaledT$GS) ~ Day_temperature + Population + Day_temperature:Population + AM + AM:Population, data = GerminationTraitsScaledT, family = beta_family(link="logit"))#can use this to check assumptions with DHARMa. The 2 models gives similar output.
+
+#model_performance(Model) ; r.squaredGLMM(Model) #rsq(Model)
+Anova(Model)
+summary(Model)
+
+Model = betareg(p.beta(GerminationTraitsScaledT$GS) ~  Population, data = GerminationTraitsScaledT)#clean other effect to keep only population for pairwise comparisons
+PairComp_GS = back.emmeans(emmeans(Model, ~ Population, mode="link"),transform="p.beta",n=120) ; colnames(PairComp_GS) = c("Population","SE_inf","EMMean","SE_sup")
+PairComp_GS = PairComp_GS %>% arrange(EMMean) %>% left_join(cld(emmeans(Model, ~ Population, mode="link"), adjust = "tukey", Letters = LETTERS)[,c("Population",".group")], by = c("Population")) %>% mutate(Population = factor(Population, levels = unique(Population)))%>% left_join(ClimateProv[,c("Population","ClimaticMoistureDeficit","RM_ThermicityIndex","Tseasonality")],by="Population")
+
+#Cross validation
+Germination_training = GerminationTraitsScaledT[sample(nrow(GerminationTraitsScaledT), 80), ]#training data set
+Germination_validate = filter(GerminationTraitsScaledT, Id %notin% Germination_training$Id)
+ModelCV = betareg(p.beta(Germination_training$GS) ~ Day_temperature + Population + Day_temperature:Population + AM + AM:Population, data = Germination_training)#training of the Model on the training dataset
+Predictions = predict(ModelCV, Germination_validate, re.form=NA, type="response")
+cor.test(Predictions, Germination_validate$GS)
+scatter_plot(obs = Germination_validate$GS, pred = Predictions) + coord_cartesian(xlim = c(0, 1), ylim = c(0, 1))#print obs VS pred on a graphe 1:1
+
+#Output tables
+GSGanova_table = rbind(c("GS","","",""),as.data.frame(Anova(Model)) %>% rownames_to_column(., "Covariate") %>% mutate_all(funs(str_replace(., "Day_temperature", "Chamber temperature"))) %>% mutate_all(funs(str_replace(., "proxi_poids", "Acorn Mass"))) %>% rename(p = "Pr(>Chisq)") %>%  
+                         mutate_at(vars(c("Chisq")), function(x) round(as.numeric(x), 2)))
+GSGsummary_table = rbind(c("GS","","","",""),as.data.frame(summary(Model)[["coefficients"]])[1:4] %>% rownames_to_column(., "Covariate") %>%  mutate_all(funs(str_replace(., "Population", ""))) %>% mutate_all(funs(str_replace(., "Day_temperature", "Chamber temperature"))) %>% mutate_all(funs(str_replace(., "proxi_poids", "Acorn Mass"))) %>% rename(p = "mean.Pr...z..") %>% 
+                           mutate_at(vars(c("mean.Estimate","mean.Std..Error","mean.z.value")), function(x) round(as.numeric(x), 2)) %>% rename("Test value" = "mean.z.value","Estimate" = "mean.Estimate","Std. Error" = "mean.Std..Error"))
+GSGPerf_table = model_performance(Model) %>% mutate(PearsonsCorrelation_obsVSpred = cor.test(Predictions, Germination_validate$GS)[["estimate"]][["cor"]],Model = "General GS model")
+```
+
+```{r  GS specific Population model}
+#Model = glmmTMB(p.beta(GerminationTraitsScaledT$GS) ~ ClimaticMoistureDeficit + Tmax_spring + Tseasonality + RM_ThermicityIndex, data = GerminationTraitsScaledT, family = beta_family(link="logit"))
+
+#Stepwise selection
+#Model = glmmTMB(p.beta(GerminationTraitsScaledT$GS) ~ RM_ThermicityIndex + Tseasonality, data = GerminationTraitsScaledT, family = beta_family(link="logit"))
+Model = betareg(p.beta(GerminationTraitsScaledT$GS) ~ RM_ThermicityIndex + Tseasonality, data = GerminationTraitsScaledT)
+
+model_performance(Model) ; r.squaredGLMM(Model) #rsq(Model)
+Anova(Model)
+summary(Model)
+
+#Cross validation
+Germination_training = GerminationTraitsScaledT[sample(nrow(GerminationTraitsScaledT), 80), ]#training data set
+Germination_validate = filter(GerminationTraitsScaledT, Id %notin% Germination_training$Id)
+Model = betareg(p.beta(Germination_training$GS) ~ RM_ThermicityIndex + Tseasonality, data = Germination_training)#training of the Model on the training dataset
+Predictions = predict(ModelCV, Germination_validate, re.form=NA, type="response")
+cor.test(Predictions, Germination_validate$GS)
+scatter_plot(obs = Germination_validate$GS, pred = Predictions)#print obs VS pred on a graphe 1:1
+
+#Output tables
+GSSanova_table = rbind(c("GS","","",""),as.data.frame(Anova(Model)) %>% rownames_to_column(., "Covariate") %>% mutate_all(funs(str_replace(., "Day_temperature", "Chamber temperature"))) %>% mutate_all(funs(str_replace(., "proxi_poids", "Acorn Mass"))) %>% rename(p = "Pr(>Chisq)") %>%  
+                         mutate_at(vars(c("Chisq")), function(x) round(as.numeric(x), 2)))
+GSSsummary_table = rbind(c("GS","","","",""),as.data.frame(summary(Model)[["coefficients"]])[1:4] %>% rownames_to_column(., "Covariate") %>%  mutate_all(funs(str_replace(., "Population", ""))) %>% mutate_all(funs(str_replace(., "Day_temperature", "Chamber temperature"))) %>% mutate_all(funs(str_replace(., "proxi_poids", "Acorn Mass"))) %>% rename(p = "mean.Pr...z..") %>% 
+                           mutate_at(vars(c("mean.Estimate","mean.Std..Error","mean.z.value")), function(x) round(as.numeric(x), 2)) %>% rename("Test value" = "mean.z.value","Estimate" = "mean.Estimate","Std. Error" = "mean.Std..Error"))
+GSSPerf_table = model_performance(Model) %>% mutate(PearsonsCorrelation_obsVSpred = cor.test(Predictions, Germination_validate$GS)[["estimate"]][["cor"]],Model = "Specific GS model")
+```
+
+##Tables export
+
+```{r  Tables export}
+#Anova Table
+##General model Table
+Ganova_table = condformat(do.call(rbind,args = list(GGanova_table, GRGanova_table, GTGanova_table, MGTGanova_table, GSGanova_table, CvGTGanova_table,CoxGanova_table))) %>% rule_text_bold(c("Covariate","Chisq","Df","p"), p <= 0.05, na.bold = FALSE, lockcells = FALSE) %>% mutate(p = ifelse(as.numeric(p) < 0.001,"<0.001",round(as.numeric(p),3))) 
+##Specific model table
+Sanova_table = condformat(do.call(rbind,args = list(GSanova_table, GRSanova_table, GTSanova_table, MGTSanova_table, GSSanova_table, CvGTSanova_table,CoxSanova_table))) %>% rule_text_bold(c("Covariate","Chisq","Df","p"), p <= 0.05, na.bold = FALSE, lockcells = FALSE) %>% mutate(p = ifelse(as.numeric(p) < 0.001,"<0.001",round(as.numeric(p),3)))
+
+#Summary Table
+##General model Table
+Gsummary_table = condformat(do.call(rbind,args = list(GGsummary_table, GRGsummary_table, GTGsummary_table, MGTGsummary_table, GSGsummary_table, CvGTGsummary_table,CoxGsummary_table))) %>% rule_text_bold(c("Covariate","Estimate","Std. Error","Test value","p"), p <= 0.05, na.bold = FALSE, lockcells = FALSE) %>% mutate(p = ifelse(as.numeric(p) < 0.001,"<0.001",round(as.numeric(p),3)))
+##Specific model table
+Ssummary_table = condformat(do.call(rbind,args = list(GSsummary_table, GRSsummary_table, GTSsummary_table, MGTSsummary_table, GSSsummary_table, CvGTSsummary_table,CoxSsummary_table))) %>% rule_text_bold(c("Covariate","Estimate","Std. Error","Test value","p"), p <= 0.05, na.bold = FALSE, lockcells = FALSE) %>% mutate(p = ifelse(as.numeric(p) < 0.001,"<0.001",round(as.numeric(p),3)))
+
+#Performance Table
+##General model Table
+GPerf_table = condformat(do.call(plyr::rbind.fill,args = list(GGPerf_table, GTGPerf_table, GSGPerf_table, CoxGPerf_table)) %>% mutate(across(where(is.numeric), round, 3)))#GRGPerf_table MGTGPerf_table
+##Specific model table
+SPerf_table = condformat(do.call(plyr::rbind.fill,args = list(GSPerf_table, GTSPerf_table, GSSPerf_table,CoxSPerf_table))%>% mutate(across(where(is.numeric), round, 3)))#GRSPerf_table MGTSPerf_table
+
+#Cox PH table
+PH_table = condformat(do.call(plyr::rbind.fill,args = list(GPH_table,SPH_table)) %>% mutate(across(where(is.numeric), round, 3)))
+
+#Export
+condformat2excel(Ganova_table, file="ModelsTableOutputs.xlsx", sheet_name="Ganova_table", overwrite_wb = FALSE, overwrite_sheet = TRUE)
+condformat2excel(Sanova_table, file="ModelsTableOutputs.xlsx", sheet_name="Sanova_table", overwrite_wb = FALSE, overwrite_sheet = TRUE)
+condformat2excel(Gsummary_table, file="ModelsTableOutputs.xlsx", sheet_name="Gsummary_table", overwrite_wb = FALSE, overwrite_sheet = TRUE)
+condformat2excel(Ssummary_table, file="ModelsTableOutputs.xlsx", sheet_name="Ssummary_table", overwrite_wb = FALSE, overwrite_sheet = TRUE)
+condformat2excel(GPerf_table, file="ModelsTableOutputs.xlsx", sheet_name="GPerf_table", overwrite_wb = FALSE, overwrite_sheet = TRUE)
+condformat2excel(SPerf_table, file="ModelsTableOutputs.xlsx", sheet_name="SPerf_table", overwrite_wb = FALSE, overwrite_sheet = TRUE)
+condformat2excel(times_table, file="ModelsTableOutputs.xlsx", sheet_name="CoxTimes", overwrite_wb = FALSE, overwrite_sheet = TRUE)
+condformat2excel(PH_table, file="ModelsTableOutputs.xlsx", sheet_name="CoxPH", overwrite_wb = FALSE, overwrite_sheet = TRUE)
+```
+
+#Germination indexes models graphical representation 
+
+Summary of the genetic effects (i.e. population climatic variables), environment effects (i.e. chamber temperature), and their interaction (i.e. chamber temperature effect according to population) on germination metrics
+
+```{r  Boxplot and curves Traits according to population}
+library(boot)# Pour inv.logit()
+GerminationTraits_stats = GerminationTraits %>% 
+  group_by(Population) %>% 
+  summarise_at(vars(GP,MGT,GS),
+               list(mean = mean,
+                    sd = sd),na.rm=T)
+
+
+ggplot()+
+  geom_point(aes(x=reorder(Population,EMMean),y=EMMean,color=Population,fill = Population),data=PairComp_GP,shape = 21,size = 4)+
+  geom_jitter(aes(x=reorder(Population,GP),y=GP,color=Population,alpha=0.2),data=GerminationTraits)+
+  geom_errorbar(aes(x=reorder(Population,EMMean),ymin = SE_inf, ymax = SE_sup, color=Population), data=PairComp_GP, size=2)+
+  geom_text(aes(x = Population,label = PairComp_GP$.group, color=Population,y=0.25), size = 15,data = PairComp_GP)+ ylab("Germination rate")+
+  theme_bw()+
+  theme(axis.text.y=element_text(size=30),axis.title.y=element_text(size=35),axis.title.x=element_blank(),axis.text.x=element_blank(),axis.ticks.x=element_blank(),legend.title=element_text(size=18),legend.text=element_text(size=15))+
+  scale_color_manual(values = OakPalette, breaks=RM_ThermicityIndex_tab[,c("Population")])+
+  scale_fill_manual(values = OakPalette, breaks=RM_ThermicityIndex_tab[,c("Population")])
+
+ggplot()+
+  geom_errorbar(aes(x=RM_ThermicityIndex,ymin = SE_inf, ymax = SE_sup, color=Population), data=PairComp_GP, size=2)+
+  geom_point(aes(x=RM_ThermicityIndex,y=EMMean, fill=Population),data=PairComp_GP,shape = 21,size = 4)+
+  geom_smooth(aes(x=RM_ThermicityIndex,y=EMMean),data=PairComp_GP,method="auto", se=TRUE, fullrange=T,span = 1.5,color = "black", fill = "#FFCC99")+
+  theme_bw()+ylab("Germination rate")+xlab("Rivas-Martínez Thermicity Index")+
+  theme(axis.text=element_text(size=30),axis.title=element_text(size=35))+
+  scale_color_manual(values = OakPalette, breaks=RM_ThermicityIndex_tab[,c("Population")])+
+  scale_fill_manual(values = OakPalette, breaks=RM_ThermicityIndex_tab[,c("Population")])
+ggplot()+
+  geom_errorbar(aes(x=Tseasonality,ymin = SE_inf, ymax = SE_sup, color=Population), data=PairComp_GP, size=2)+
+  geom_point(aes(x=Tseasonality,y=EMMean, fill=Population),data=PairComp_GP,shape = 21,size = 4)+
+  geom_smooth(aes(x=Tseasonality,y=EMMean),data=PairComp_GP,method="auto", se=TRUE, fullrange=T,span = 1.5,color = "black", fill = "#FFCC99")+
+  theme_bw()+ylab("Germination rate")+xlab("Temperature Seasonality")+
+  theme(axis.text=element_text(size=30),axis.title=element_text(size=35))+
+  scale_color_manual(values = OakPalette, breaks=RM_ThermicityIndex_tab[,c("Population")])+
+  scale_fill_manual(values = OakPalette, breaks=RM_ThermicityIndex_tab[,c("Population")])
+
+ggplot()+
+  geom_point(aes(x=reorder(Population,EMMean),y=EMMean,color=Population,fill = Population),data=PairComp_MGT,shape = 21,size = 4)+
+  geom_jitter(aes(x=reorder(Population,MGT),y=MGT,color=Population,alpha=0.2),data=GerminationTraits)+
+  geom_errorbar(aes(x=reorder(Population,EMMean),ymin = SE_inf, ymax = SE_sup, color=Population), data=PairComp_MGT, size=2)+
+  geom_text(aes(x = Population,label = PairComp_MGT$.group, color=Population,y=40), size = 15,data = PairComp_MGT)+ ylab("Mean germination \n time")+
+  theme_bw()+
+  theme(axis.text.y=element_text(size=30),axis.title.y=element_text(size=35),axis.title.x=element_blank(),axis.text.x=element_blank(),axis.ticks.x=element_blank(),legend.title=element_text(size=18),legend.text=element_text(size=15))+
+  scale_color_manual(values = OakPalette, breaks=RM_ThermicityIndex_tab[,c("Population")])+
+  scale_fill_manual(values = OakPalette, breaks=RM_ThermicityIndex_tab[,c("Population")])
+
+ggplot()+
+  geom_point(aes(x=RM_ThermicityIndex,y=EMMean, fill=Population),data=PairComp_MGT,shape = 21,size = 4)+
+  geom_smooth(aes(x=RM_ThermicityIndex,y=EMMean),data=PairComp_MGT,method="auto", se=TRUE, fullrange=T,span = 1.5,color = "black", fill = "#FFCC99")+
+  geom_errorbar(aes(x=RM_ThermicityIndex,ymin = SE_inf, ymax = SE_sup, color=Population), data=PairComp_MGT, size=2)+
+  theme_bw()+ylab("Mean germination time")+xlab("Rivas-Martínez Thermicity Index")+
+  theme(axis.text=element_text(size=30),axis.title=element_text(size=35))+
+  scale_color_manual(values = OakPalette, breaks=RM_ThermicityIndex_tab[,c("Population")])+
+  scale_fill_manual(values = OakPalette, breaks=RM_ThermicityIndex_tab[,c("Population")])
+ggplot()+
+  geom_point(aes(x=ClimaticMoistureDeficit,y=EMMean, fill=Population),data=PairComp_MGT,shape = 21,size = 4)+
+  geom_smooth(aes(x=ClimaticMoistureDeficit,y=EMMean),data=PairComp_MGT,method="auto", se=TRUE, fullrange=T,span = 1.5,color = "black", fill = "#FFCC99")+
+  geom_errorbar(aes(x=ClimaticMoistureDeficit,ymin = SE_inf, ymax = SE_sup, color=Population), data=PairComp_MGT, size=2)+
+  theme_bw()+ylab("Mean germination time")+xlab("Climatic Moisture Deficit")+
+  theme(axis.text=element_text(size=30),axis.title=element_text(size=35))+
+  scale_color_manual(values = OakPalette, breaks=RM_ThermicityIndex_tab[,c("Population")])+
+  scale_fill_manual(values = OakPalette, breaks=RM_ThermicityIndex_tab[,c("Population")])
+ggplot()+
+  geom_point(aes(x=Tseasonality,y=EMMean, fill=Population),data=PairComp_MGT,shape = 21,size = 4)+
+  geom_smooth(aes(x=Tseasonality,y=EMMean),data=PairComp_MGT,method="auto", se=TRUE, fullrange=T,span = 1.5,color = "black", fill = "#FFCC99")+
+  geom_errorbar(aes(x=Tseasonality,ymin = SE_inf, ymax = SE_sup, color=Population), data=PairComp_MGT, size=2)+
+  theme_bw()+ylab("Mean germination time")+xlab("Temperature Seasonality")+
+  theme(axis.text=element_text(size=30),axis.title=element_text(size=35))+
+  scale_color_manual(values = OakPalette, breaks=RM_ThermicityIndex_tab[,c("Population")])+
+  scale_fill_manual(values = OakPalette, breaks=RM_ThermicityIndex_tab[,c("Population")])
+ggplot()+
+  geom_smooth(aes(x=Tseasonality,y=EMMean,color=Day_temperature, fill = Day_temperature),data=PairComp2_MGT,method="auto", se=TRUE, fullrange=T,span = 1.5, alpha=0.2)+
+  geom_point(aes(x=Tseasonality,y=EMMean,color=Day_temperature),data=PairComp2_MGT,size = 2, position = position_dodge(width=20))+
+  geom_errorbar(aes(x=Tseasonality,ymin = SE_inf, ymax = SE_sup,color=Day_temperature), data=PairComp2_MGT, size=1, position = position_dodge(width=20))+
+  theme_bw()+ylab("Mean germination time")+xlab("Temperature Seasonality")+
+  theme(axis.text=element_text(size=30),axis.title=element_text(size=35),legend.text = element_text(size = 16),legend.title = element_text(size = 18))+
+  scale_color_manual(values = c("15" = "#0072B2", "20" = "#F0E442", "25" = "#D55E00"),name = "Chamber temperature")+
+  scale_fill_manual(values = c("15" = "#0072B2", "20" = "#F0E442", "25" = "#D55E00"),name = "Chamber temperature")
+
+ggplot()+
+  geom_point(aes(x=reorder(Population,EMMean),y=EMMean,color=Population,fill = Population),data=PairComp_GS,shape = 21,size = 4)+
+  geom_jitter(aes(x=reorder(Population,GS),y=GS,color=Population,alpha=0.2),data=GerminationTraits)+
+  geom_errorbar(aes(x=reorder(Population,EMMean),ymin = SE_inf, ymax = SE_sup, color=Population), data=PairComp_GS, size=2)+
+  geom_text(aes(x = Population,label = PairComp_GS$.group, color=Population,y=0.8), size = 15,data = PairComp_GS)+ ylab("Germination \n synchrony")+ylim(0,1)+
+  theme_bw()+
+  theme(axis.text.y=element_text(size=30),axis.title.y=element_text(size=35),axis.title.x=element_blank(),axis.text.x=element_blank(),axis.ticks.x=element_blank(),legend.title=element_text(size=18),legend.text=element_text(size=15))+
+  scale_color_manual(values = OakPalette, breaks=RM_ThermicityIndex_tab[,c("Population")])+
+  scale_fill_manual(values = OakPalette, breaks=RM_ThermicityIndex_tab[,c("Population")])
+
+ggplot()+
+  geom_point(aes(x=RM_ThermicityIndex,y=EMMean, fill=Population),data=PairComp_GS,shape = 21,size = 4)+
+  geom_smooth(aes(x=RM_ThermicityIndex,y=EMMean),data=PairComp_GS,method="auto", se=TRUE, fullrange=T,span = 1.5,color = "black", fill = "#FFCC99")+
+  geom_errorbar(aes(x=RM_ThermicityIndex,ymin = SE_inf, ymax = SE_sup, color=Population), data=PairComp_GS, size=2)+
+  theme_bw()+ylab("Germination synchrony")+xlab("Rivas-Martínez Thermicity Index")+
+  theme(axis.text=element_text(size=30),axis.title=element_text(size=35),legend.text = element_text(size = 16),legend.title = element_text(size = 18))+
+  scale_color_manual(values = OakPalette, breaks=RM_ThermicityIndex_tab[,c("Population")])+
+  scale_fill_manual(values = OakPalette, breaks=RM_ThermicityIndex_tab[,c("Population")])
+
+GerminationTraits_stats2 = GerminationTraits[,c("Population","Day_temperature","MGT")] %>% 
+  mutate(Day_temperature = as.factor(Day_temperature)) %>% 
+  group_by(Population,Day_temperature) %>% 
+  summarise_at(vars(MGT),
+               list(mean = mean,
+                    sd = sd),na.rm=T) %>% 
+  left_join(RM_Tseason_tab,by="Population")
+
+ggplot()+
+  geom_point(aes(x=reorder(Population, Tseasonality),y=EMMean, group = reorder_within(Day_temperature, EMMean, Population), color=Day_temperature, fill = Day_temperature), data=PairComp2_MGT,shape = 21,size = 4, position = position_dodge(width=0.9))+
+  geom_jitter(aes(x=reorder(Population, MGT),y=MGT, group = reorder_within(Day_temperature, MGT, Population), color=Day_temperature, fill = Day_temperature,alpha=0.2),data=GerminationTraits %>% mutate(Day_temperature=as.character(Day_temperature)), position = position_dodge(width=0.9))+
+  geom_errorbar(aes(x=reorder(Population, Tseasonality),ymin = SE_inf, ymax = SE_sup, group = reorder_within(Day_temperature, EMMean, Population), color=Day_temperature), data=PairComp2_MGT, size=2, position = position_dodge(width=0.9))+
+  geom_text(aes(x=reorder(Population, Tseasonality),label = PairComp2_MGT$.group, group = reorder_within(Day_temperature, EMMean, Population), color=Day_temperature,y=40), size = 15,data = PairComp2_MGT, position = position_dodge(width=0.9))+ ylab("Mean germination \n time")+
+  theme_bw()+
+  theme(axis.text.y=element_text(size=30),axis.text.x=element_text(size=30,angle = -10), axis.title.y=element_text(size=35), axis.title.x=element_blank(), axis.ticks.x=element_blank(),legend.title=element_text(size=20),legend.text=element_text(size=15))+
+  scale_color_manual(values = c("15" = "#0072B2", "20" = "#F0E442", "25" = "#D55E00"),name = "Chamber temperature")+
+  scale_fill_manual(values = c("15" = "#0072B2", "20" = "#F0E442", "25" = "#D55E00"),name = "Chamber temperature")
+```
+
+```{r  Patterns of germination in time}
+ggplot(data = GerminationT)+
+  geom_histogram(aes(x = Germination_time))+
+  theme_bw()+
+  facet_wrap2( ~ factor(Population, levels=c("Tabarka", "Los Alcornocales", "Fernana", "Quinta de Serra", "Fuencaliente", "Tuscania", "Moliets et Maa", "Padouen")), ncol=4, nrow = 2,strip = strip_themed(background_x = elem_list_rect(fill = OakPalette)))
+```
+
+
+```{r  ACP G(0,1) & GR}
+ACP = PCA(BothScaled[,c("Population","GP","Germination","Tseasonality","RM_ThermicityIndex")], scale.unit =TRUE, ncp = 6, graph = F, quali.sup = c(1,3))
+
+fviz_pca_var(ACP, axes = c(1, 2), col.quanti.sup = "blue", col.var = factor(c("Trait", "Temperature seasonality", "Cold intensity and \n annual temperature")),palette = ACPVarPalette,legend.title = list(color = "Type"),repel=T)
+
+fviz_eig(ACP, addlabels = TRUE, ylim = c(0, 50))#Graphe des éboulis
+```
+
+```{r  ACP GT & MGT}
+ACP = PCA(filter(BothScaled[,c("Population","MGT","Germination_time","ClimaticMoistureDeficit","RM_ThermicityIndex","Tmax_spring","Tseasonality")],!is.na(Germination_time) & !is.na(MGT)), scale.unit =TRUE, ncp = 8, graph = F, quali.sup = c(1))
+
+fviz_pca_var(ACP, axes = c(1, 2), col.quanti.sup = "blue", col.var = factor(c("Trait", "Trait","Water stress","Cold intensity and \n annual temperature","Spring temperature","Temperature seasonality")),palette = ACPVarPalette,legend.title = list(color = "Type"),repel=T)
+fviz_pca_var(ACP, axes = c(1, 3), col.quanti.sup = "blue", col.var = factor(c("Trait", "Trait","Water stress","Cold intensity and \n annual temperature","Spring temperature","Temperature seasonality")),palette = ACPVarPalette,legend.title = list(color = "Type"),repel=T)
+
+fviz_eig(ACP, addlabels = TRUE, ylim = c(0, 50))#Graphe des éboulis
+```
+
+```{r  ACP GS}
+ACP = PCA(filter(BothScaled[,c("Population","GS","RM_ThermicityIndex")],!is.na(GS)), scale.unit =TRUE, ncp = 8, graph = F, quali.sup = c(1))
+
+fviz_pca_var(ACP, axes = c(1, 2), col.quanti.sup = "blue", col.var = factor(c("Trait", "Cold intensity and \n annual temperature")),palette = ACPVarPalette,legend.title = list(color = "Type"),repel=T)
+
+fviz_eig(ACP, addlabels = TRUE, ylim = c(0, 50))#Graphe des éboulis
+```
+
+```{r  ACP CvGT}
+ACP = PCA(filter(BothScaled[,c("Population","CvGT","ClimaticMoistureDeficit","Tseasonality")],!is.na(CvGT)), scale.unit =TRUE, ncp = 8, graph = F, quali.sup = c(1))
+
+fviz_pca_var(ACP, axes = c(1, 2), col.quanti.sup = "blue", col.var = factor(c("Trait", "Water stress", "Temperature seasonality")),palette = ACPVarPalette,legend.title = list(color = "Type"),repel=T)
+
+fviz_eig(ACP, addlabels = TRUE, ylim = c(0, 50))#Graphe des éboulis
+```
+
+Aide-mémoire de l’écriture des effets aléatoires dans un modèle mixte 
+Voir https://eshinjolly.com/pymer4/rfx_cheatsheet.html
+Random intercepts only
+(1 | Group)
+Random slopes only
+(0 + Variable | Group)
+Random intercepts and slopes (and their correlation)
+(Variable | Group) (modèle plus général que celui juste en dessous)
+Random intercepts and slopes (without their correlation)
+(1 | Group) + (0 + Variable | Group)
+Same as above but will not separate factors (seK: https://rdrr.io/cran/lme4/man/expandDoubleVerts.html)
+(Variable || Group)
+Random intercept and slope for more than one variable (and their correlations)
+(Variable_1 + Variable_2 | Group)
