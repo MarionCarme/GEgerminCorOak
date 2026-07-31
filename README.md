@@ -8,7 +8,7 @@ Marion Carme<sup>1</sup>, Eduardo Vicente<sup>2</sup>, Filipe Costa e Silva<sup>
 <sup>5</sup> National Institute of Research in Rural Engineering Water and Forestry (INRGREF), Rue Hedi Karray, BP 10 2080-Ariana. LR16INRGREF01. University of Carthage, Tunisia  
 
 ---
-This repository contains the script used in Carme _et al. submitted_.
+This repository contains the script used for Carme _et al._ 2026. Data can be found in the Zenodo repository: https://doi.org/10.5281/zenodo.21707185
 
 ---
 **Paper abstract**
